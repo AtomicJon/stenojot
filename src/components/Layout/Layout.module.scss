@@ -1,0 +1,11 @@
+@use "../../styles" as *;
+
+.layout {
+  max-width: $content-max-width;
+  margin: 0 auto;
+  padding: $space-24;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: $space-20;
+}
