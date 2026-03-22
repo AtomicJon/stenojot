@@ -7,6 +7,7 @@ use tauri::ipc::Channel;
 use tauri::State;
 
 use crate::audio::capture;
+use crate::audio::system_capture::{self, SystemCaptureHandle};
 use crate::audio::types::{AudioDevice, AudioLevels, CaptureError, TranscriptSegment};
 use crate::transcription::manager::{self, ModelInfo};
 use crate::transcription::worker::TranscriptionWorker;
@@ -19,7 +20,7 @@ pub struct AppState {
     pub mic_rms: Arc<AtomicU32>,
     pub system_rms: Arc<AtomicU32>,
     pub mic_stream: Option<Stream>,
-    pub system_stream: Option<Stream>,
+    pub system_capture: Option<SystemCaptureHandle>,
     pub worker: Option<TranscriptionWorker>,
     pub mic_sample_rate: u32,
     pub mic_channels: u16,
@@ -44,7 +45,7 @@ impl AppState {
             mic_rms: Arc::new(AtomicU32::new(0)),
             system_rms: Arc::new(AtomicU32::new(0)),
             mic_stream: None,
-            system_stream: None,
+            system_capture: None,
             worker: None,
             mic_sample_rate: 0,
             mic_channels: 0,
@@ -54,10 +55,20 @@ impl AppState {
     }
 }
 
-/// List all available audio input devices.
+/// List available microphone input devices (via cpal/ALSA).
 #[tauri::command]
 pub fn get_audio_devices() -> Result<Vec<AudioDevice>, String> {
     capture::list_input_devices().map_err(|e| e.to_string())
+}
+
+/// List available system audio monitor sources (via PulseAudio/PipeWire).
+///
+/// Monitor sources capture system audio output — what comes through speakers
+/// or headphones. These are not visible through ALSA, so we query PulseAudio
+/// directly.
+#[tauri::command]
+pub fn get_system_audio_devices() -> Result<Vec<AudioDevice>, String> {
+    system_capture::list_monitor_sources().map_err(|e| e.to_string())
 }
 
 /// Start recording from the specified mic and system audio devices.
@@ -90,17 +101,24 @@ pub fn start_recording(
     app_state.mic_sample_rate = mic_handle.sample_rate;
     app_state.mic_channels = mic_handle.channels;
 
-    // Start system audio capture
-    let system_handle = capture::start_capture(&system_device_id).map_err(|e| e.to_string())?;
-    app_state.system_rms = system_handle.rms_level;
+    // Start system audio capture via PulseAudio monitor source
+    let mut system_handle =
+        system_capture::start_system_capture(&system_device_id).map_err(|e| e.to_string())?;
+    app_state.system_rms = Arc::clone(&system_handle.rms_level);
     app_state.system_sample_rate = system_handle.sample_rate;
     app_state.system_channels = system_handle.channels;
+
+    // Take the consumer out of the system handle — worker needs ownership
+    let system_consumer = system_handle
+        .consumer
+        .take()
+        .ok_or("System audio consumer already taken")?;
 
     // Spawn the transcription worker with ownership of the ring buffer consumers
     let worker = TranscriptionWorker::start(
         model_path,
         mic_handle.consumer,
-        system_handle.consumer,
+        system_consumer,
         app_state.mic_sample_rate,
         app_state.mic_channels,
         app_state.system_sample_rate,
@@ -109,7 +127,7 @@ pub fn start_recording(
     )?;
 
     app_state.mic_stream = Some(mic_handle.stream);
-    app_state.system_stream = Some(system_handle.stream);
+    app_state.system_capture = Some(system_handle);
     app_state.mic_device_id = Some(mic_device_id);
     app_state.system_device_id = Some(system_device_id);
     app_state.worker = Some(worker);
@@ -129,9 +147,12 @@ pub fn stop_recording(state: State<'_, Mutex<AppState>>) -> Result<(), String> {
         return Err(CaptureError::NotRecording.to_string());
     }
 
-    // Dropping the streams stops capture
+    // Stop audio capture
     app_state.mic_stream = None;
-    app_state.system_stream = None;
+    if let Some(ref mut sys) = app_state.system_capture {
+        sys.stop();
+    }
+    app_state.system_capture = None;
     app_state.mic_device_id = None;
     app_state.system_device_id = None;
     app_state.is_recording = false;

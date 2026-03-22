@@ -12,6 +12,7 @@ pub fn run() {
         .manage(Mutex::new(AppState::new()))
         .invoke_handler(tauri::generate_handler![
             commands::get_audio_devices,
+            commands::get_system_audio_devices,
             commands::start_recording,
             commands::stop_recording,
             commands::get_audio_levels,

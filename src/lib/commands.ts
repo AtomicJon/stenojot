@@ -1,9 +1,14 @@
 import { invoke, Channel } from "@tauri-apps/api/core";
 import type { AudioDevice, AudioLevels, ModelInfo, TranscriptSegment } from "../types";
 
-/** List all available audio input devices. */
+/** List available microphone input devices (via cpal/ALSA). */
 export function getAudioDevices(): Promise<AudioDevice[]> {
   return invoke<AudioDevice[]>("get_audio_devices");
+}
+
+/** List available system audio monitor sources (via PulseAudio/PipeWire). */
+export function getSystemAudioDevices(): Promise<AudioDevice[]> {
+  return invoke<AudioDevice[]>("get_system_audio_devices");
 }
 
 /**

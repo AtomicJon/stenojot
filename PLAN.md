@@ -286,7 +286,9 @@ Each meeting produces two files, named with an ISO 8601 date prefix and a meetin
 
 ```toml
 # Audio capture (Phase 1 — installed)
-cpal = "0.15"              # Mic + system audio capture (cross-platform, user selects monitor source)
+cpal = "0.15"              # Microphone capture via ALSA (Linux)
+libpulse-binding = "2.28"  # PulseAudio API for system audio monitor sources (Linux)
+libpulse-simple-binding = "2.28"  # PulseAudio Simple API for capture
 ringbuf = "0.4"            # Lock-free SPSC ring buffers
 rubato = "0.15"            # Sample rate conversion (→ 16kHz for Whisper)
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros"] }
@@ -296,7 +298,6 @@ whisper-rs = "0.16"        # Local Whisper transcription (requires clang for bui
 reqwest = "0.12"           # Model download from Hugging Face (blocking + stream features)
 
 # Platform-specific system audio (Phase 5 — not yet installed)
-# pipewire = "0.9"         # Automatic monitor source detection (Linux)
 # wasapi = "0.19"          # WASAPI loopback capture (Windows)
 # screencapturekit = "1.5" # ScreenCaptureKit (macOS)
 
@@ -314,18 +315,19 @@ tauri-plugin-opener = "2"
 ### Phase 1: Audio Capture Foundation ✅
 **Complexity: Medium | Focus: Getting audio flowing**
 
-- [x] **1.1** Audio capture via cpal with device enumeration (used cpal for both mic and system audio instead of PipeWire-specific code — on Linux with PipeWire, monitor sources appear as cpal input devices)
+- [x] **1.1** Audio capture with device enumeration — cpal for microphone, PulseAudio Simple API for system audio monitor sources
 - [x] **1.2** Implement microphone capture via cpal
 - [x] **1.3** Implement ring buffer pipeline with resampling (→ 16kHz mono via rubato)
 - [x] **1.4** Add basic VAD (energy-based RMS threshold)
-- [x] **1.5** Wire up Tauri commands: `start_recording`, `stop_recording`, `get_audio_devices`, `get_audio_levels`
+- [x] **1.5** Wire up Tauri commands: `start_recording`, `stop_recording`, `get_audio_devices`, `get_system_audio_devices`, `get_audio_levels`
 - [x] **1.6** Basic frontend: device selector dropdowns, start/stop button, elapsed timer, animated audio level meters, transcript placeholder
 
 **Implementation notes:**
-- Used cpal for both mic and system audio (user selects monitor source from device list) rather than PipeWire-specific code. Simpler and still cross-platform. Platform-specific backends (PipeWire, WASAPI, ScreenCaptureKit) can be added later behind the `AudioCapture` trait if automatic monitor source detection is needed.
+- **Microphone** captured via cpal (uses ALSA on Linux). **System audio** captured via PulseAudio Simple API (`libpulse-simple-binding`) from monitor sources. cpal/ALSA does not expose PipeWire/PulseAudio monitor sources, so system audio requires a separate capture path. Monitor sources are enumerated via `pactl list short sources` and filtered for `.monitor` entries.
+- Separate device dropdowns in the frontend: mic devices from `get_audio_devices` (cpal), system audio devices from `get_system_audio_devices` (PulseAudio monitors).
 - RMS levels shared between audio callback threads and UI via `Arc<AtomicU32>` (storing f32 bits).
-- Ring buffers drain on each `get_audio_levels` poll to prevent overflow until Phase 2 wires up the transcription consumer.
 - `cpal::Stream` is `!Send`; `AppState` uses `unsafe impl Send + Sync` with all access gated behind a `Mutex`.
+- Platform-specific backends (WASAPI, ScreenCaptureKit) can be added later for Windows/macOS.
 
 ### Phase 2: Transcription Pipeline ✅
 **Complexity: Medium-High | Focus: Whisper integration**

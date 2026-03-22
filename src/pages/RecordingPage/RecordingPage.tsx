@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Link } from "react-router-dom";
 import {
   getAudioDevices,
+  getSystemAudioDevices,
   startRecording,
   stopRecording,
   getAudioLevels,
@@ -23,7 +24,8 @@ function formatTimestamp(ms: number): string {
 
 /** Main recording page with device selection, controls, audio meters, and live transcript. */
 export function RecordingPage() {
-  const [devices, setDevices] = useState<AudioDevice[]>([]);
+  const [micDevices, setMicDevices] = useState<AudioDevice[]>([]);
+  const [systemDevices, setSystemDevices] = useState<AudioDevice[]>([]);
   const [micDeviceId, setMicDeviceId] = useState("");
   const [systemDeviceId, setSystemDeviceId] = useState("");
   const [isRecording, setIsRecording] = useState(false);
@@ -48,18 +50,21 @@ export function RecordingPage() {
   useEffect(() => {
     async function init() {
       try {
-        const devs = await getAudioDevices();
-        setDevices(devs);
-        const defaultDev = devs.find((d) => d.is_default);
-        if (defaultDev) {
-          setMicDeviceId(defaultDev.id);
-          setSystemDeviceId(defaultDev.id);
-        } else if (devs.length > 0) {
-          setMicDeviceId(devs[0].id);
-          setSystemDeviceId(devs[0].id);
-        }
+        const micDevs = await getAudioDevices();
+        setMicDevices(micDevs);
+        const defaultMic = micDevs.find((d) => d.is_default);
+        setMicDeviceId(defaultMic?.id ?? micDevs[0]?.id ?? "");
       } catch (err) {
-        console.error("Failed to get audio devices:", err);
+        console.error("Failed to get mic devices:", err);
+      }
+
+      try {
+        const sysDevs = await getSystemAudioDevices();
+        setSystemDevices(sysDevs);
+        const defaultSys = sysDevs.find((d) => d.is_default);
+        setSystemDeviceId(defaultSys?.id ?? sysDevs[0]?.id ?? "");
+      } catch (err) {
+        console.error("Failed to get system audio devices:", err);
       }
 
       try {
@@ -179,7 +184,7 @@ export function RecordingPage() {
                 value={micDeviceId}
                 onChange={(e) => setMicDeviceId(e.target.value)}
               >
-                {devices.map((d) => (
+                {micDevices.map((d) => (
                   <option key={d.id} value={d.id}>
                     {d.name}
                     {d.is_default ? " (Default)" : ""}
@@ -193,7 +198,7 @@ export function RecordingPage() {
                 value={systemDeviceId}
                 onChange={(e) => setSystemDeviceId(e.target.value)}
               >
-                {devices.map((d) => (
+                {systemDevices.map((d) => (
                   <option key={d.id} value={d.id}>
                     {d.name}
                     {d.is_default ? " (Default)" : ""}
