@@ -1,5 +1,11 @@
 import { invoke, Channel } from "@tauri-apps/api/core";
-import type { AudioDevice, AudioLevels, ModelInfo, TranscriptSegment } from "../types";
+import type {
+  AudioDevice,
+  AudioLevels,
+  ModelInfo,
+  PersistedSettings,
+  TranscriptSegment,
+} from "../types";
 
 /** List available microphone input devices (via cpal/ALSA). */
 export function getAudioDevices(): Promise<AudioDevice[]> {
@@ -67,6 +73,27 @@ export function setVadThreshold(threshold: number): Promise<void> {
 /** Get the current VAD sensitivity threshold. */
 export function getVadThreshold(): Promise<number> {
   return invoke<number>("get_vad_threshold");
+}
+
+/** Retrieve persisted application settings from disk. */
+export function getSettings(): Promise<PersistedSettings> {
+  return invoke<PersistedSettings>("get_settings");
+}
+
+/**
+ * Set and persist the preferred microphone device ID.
+ * @param deviceId - ID of the preferred microphone device
+ */
+export function setPreferredMic(deviceId: string): Promise<void> {
+  return invoke("set_preferred_mic", { deviceId });
+}
+
+/**
+ * Set and persist the preferred system audio device ID.
+ * @param deviceId - ID of the preferred system audio monitor source
+ */
+export function setPreferredSystemDevice(deviceId: string): Promise<void> {
+  return invoke("set_preferred_system_device", { deviceId });
 }
 
 /** Retrieve detailed information about the Whisper transcription model. */

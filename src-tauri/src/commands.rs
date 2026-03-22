@@ -1,6 +1,7 @@
 //! Tauri command handlers for audio capture and transcription management.
 
 use cpal::Stream;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::ipc::Channel;
@@ -10,14 +11,21 @@ use crate::audio::capture;
 use crate::audio::pipeline;
 use crate::audio::system_capture::{self, SystemCaptureHandle};
 use crate::audio::types::{AudioDevice, AudioLevels, CaptureError, TranscriptSegment};
+use crate::settings::{self, Settings};
 use crate::transcription::manager::{self, ModelInfo};
 use crate::transcription::worker::TranscriptionWorker;
 
 /// Application state managed by Tauri.
 pub struct AppState {
     pub is_recording: bool,
+    /// Active mic device ID during recording.
     pub mic_device_id: Option<String>,
+    /// Active system device ID during recording.
     pub system_device_id: Option<String>,
+    /// Preferred mic device ID (persisted across launches).
+    pub preferred_mic_device_id: Option<String>,
+    /// Preferred system audio device ID (persisted across launches).
+    pub preferred_system_device_id: Option<String>,
     pub mic_rms: Arc<AtomicU32>,
     pub system_rms: Arc<AtomicU32>,
     pub mic_gain: Arc<AtomicU32>,
@@ -29,6 +37,8 @@ pub struct AppState {
     pub mic_channels: u16,
     pub system_sample_rate: u32,
     pub system_channels: u16,
+    /// App config directory for persisting settings.
+    pub config_dir: PathBuf,
 }
 
 // Safety: cpal::Stream is !Send and !Sync, but we only ever access it
@@ -45,6 +55,8 @@ impl AppState {
             is_recording: false,
             mic_device_id: None,
             system_device_id: None,
+            preferred_mic_device_id: None,
+            preferred_system_device_id: None,
             mic_rms: Arc::new(AtomicU32::new(0)),
             system_rms: Arc::new(AtomicU32::new(0)),
             mic_gain: Arc::new(AtomicU32::new(1.0f32.to_bits())),
@@ -58,7 +70,23 @@ impl AppState {
             mic_channels: 0,
             system_sample_rate: 0,
             system_channels: 0,
+            config_dir: PathBuf::new(),
         }
+    }
+}
+
+/// Build a `Settings` snapshot from the current app state and persist it.
+fn save_current_settings(app_state: &AppState) {
+    let settings = Settings {
+        mic_device_id: app_state.preferred_mic_device_id.clone(),
+        system_device_id: app_state.preferred_system_device_id.clone(),
+        mic_gain: f32::from_bits(app_state.mic_gain.load(Ordering::Relaxed)),
+        vad_threshold: f32::from_bits(app_state.vad_threshold.load(Ordering::Relaxed)),
+        models_dir: manager::get_custom_models_dir()
+            .map(|p| p.to_string_lossy().to_string()),
+    };
+    if let Err(e) = settings::save(&app_state.config_dir, &settings) {
+        eprintln!("Failed to save settings: {}", e);
     }
 }
 
@@ -76,6 +104,31 @@ pub fn get_audio_devices() -> Result<Vec<AudioDevice>, String> {
 #[tauri::command]
 pub fn get_system_audio_devices() -> Result<Vec<AudioDevice>, String> {
     system_capture::list_monitor_sources().map_err(|e| e.to_string())
+}
+
+/// Retrieve persisted application settings.
+#[tauri::command]
+pub fn get_settings(state: State<'_, Mutex<AppState>>) -> Result<Settings, String> {
+    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    Ok(settings::load(&app_state.config_dir))
+}
+
+/// Set and persist the preferred microphone device ID.
+#[tauri::command]
+pub fn set_preferred_mic(device_id: String, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
+    let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    app_state.preferred_mic_device_id = Some(device_id);
+    save_current_settings(&app_state);
+    Ok(())
+}
+
+/// Set and persist the preferred system audio device ID.
+#[tauri::command]
+pub fn set_preferred_system_device(device_id: String, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
+    let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    app_state.preferred_system_device_id = Some(device_id);
+    save_current_settings(&app_state);
+    Ok(())
 }
 
 /// Start recording from the specified mic and system audio devices.
@@ -198,11 +251,13 @@ pub fn get_audio_levels(state: State<'_, Mutex<AppState>>) -> Result<AudioLevels
 ///
 /// Takes effect immediately — the gain is applied in the audio capture callback,
 /// so it affects both the level meter and the audio sent to Whisper.
+/// The new value is automatically persisted to disk.
 #[tauri::command]
 pub fn set_mic_gain(gain: f32, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
     let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
     let clamped = gain.clamp(0.1, 10.0);
     app_state.mic_gain.store(clamped.to_bits(), Ordering::Relaxed);
+    save_current_settings(&app_state);
     Ok(())
 }
 
@@ -217,6 +272,7 @@ pub fn get_mic_gain(state: State<'_, Mutex<AppState>>) -> Result<f32, String> {
 ///
 /// Lower values detect quieter speech; higher values require louder input.
 /// Takes effect immediately during recording.
+/// The new value is automatically persisted to disk.
 #[tauri::command]
 pub fn set_vad_threshold(threshold: f32, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
     let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
@@ -224,6 +280,7 @@ pub fn set_vad_threshold(threshold: f32, state: State<'_, Mutex<AppState>>) -> R
     app_state
         .vad_threshold
         .store(clamped.to_bits(), Ordering::Relaxed);
+    save_current_settings(&app_state);
     Ok(())
 }
 
@@ -251,13 +308,16 @@ pub fn delete_model() -> Result<(), String> {
 /// Set a custom directory for storing Whisper model files.
 ///
 /// Pass an empty string to reset to the default location.
+/// The new value is automatically persisted to disk.
 #[tauri::command]
-pub fn set_models_dir(path: String) -> Result<(), String> {
+pub fn set_models_dir(path: String, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
     if path.is_empty() {
         manager::reset_models_dir();
     } else {
         manager::set_models_dir(std::path::PathBuf::from(path))?;
     }
+    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    save_current_settings(&app_state);
     Ok(())
 }
 

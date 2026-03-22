@@ -20,6 +20,15 @@ export interface ModelInfo {
   models_dir: string;
 }
 
+/** Persisted application settings from the backend. */
+export interface PersistedSettings {
+  mic_device_id: string | null;
+  system_device_id: string | null;
+  mic_gain: number;
+  vad_threshold: number;
+  models_dir: string | null;
+}
+
 /** A single segment of transcribed speech. */
 export interface TranscriptSegment {
   text: string;

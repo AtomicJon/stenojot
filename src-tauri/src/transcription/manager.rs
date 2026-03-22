@@ -67,6 +67,15 @@ pub fn get_models_dir() -> PathBuf {
     default_models_dir()
 }
 
+/// Returns the custom models directory if one has been set, or `None`
+/// if using the default location.
+pub fn get_custom_models_dir() -> Option<PathBuf> {
+    if let Ok(dir) = CUSTOM_MODELS_DIR.lock() {
+        return dir.clone();
+    }
+    None
+}
+
 /// Returns the default models directory (`~/.local/share/echonotes/models/`).
 fn default_models_dir() -> PathBuf {
     dirs_like_home().join(".local/share/echonotes/models")

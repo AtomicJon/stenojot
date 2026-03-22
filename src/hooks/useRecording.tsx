@@ -10,6 +10,9 @@ import type { ReactNode } from "react";
 import {
   getAudioDevices,
   getSystemAudioDevices,
+  getSettings,
+  setPreferredMic,
+  setPreferredSystemDevice,
   startRecording,
   stopRecording,
   getAudioLevels,
@@ -98,14 +101,30 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const levelPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Fetch devices, audio settings, and model status on mount
+  // Fetch devices, audio settings, and model status on mount.
+  // Persisted settings are used to restore preferred devices if still available.
   useEffect(() => {
     async function init() {
+      // Load persisted settings first so we can restore preferred devices
+      let preferredMicId: string | null = null;
+      let preferredSystemId: string | null = null;
+      try {
+        const saved = await getSettings();
+        preferredMicId = saved.mic_device_id;
+        preferredSystemId = saved.system_device_id;
+      } catch (err) {
+        console.error("Failed to load persisted settings:", err);
+      }
+
       try {
         const micDevs = await getAudioDevices();
         setMicDevices(micDevs);
+        // Restore preferred device if it's still connected, else fall back to default
+        const preferred = preferredMicId
+          ? micDevs.find((d) => d.id === preferredMicId)
+          : null;
         const defaultMic = micDevs.find((d) => d.is_default);
-        setMicDeviceId(defaultMic?.id ?? micDevs[0]?.id ?? "");
+        setMicDeviceId(preferred?.id ?? defaultMic?.id ?? micDevs[0]?.id ?? "");
       } catch (err) {
         console.error("Failed to get mic devices:", err);
       }
@@ -113,8 +132,11 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
       try {
         const sysDevs = await getSystemAudioDevices();
         setSystemDevices(sysDevs);
+        const preferred = preferredSystemId
+          ? sysDevs.find((d) => d.id === preferredSystemId)
+          : null;
         const defaultSys = sysDevs.find((d) => d.is_default);
-        setSystemDeviceId(defaultSys?.id ?? sysDevs[0]?.id ?? "");
+        setSystemDeviceId(preferred?.id ?? defaultSys?.id ?? sysDevs[0]?.id ?? "");
       } catch (err) {
         console.error("Failed to get system audio devices:", err);
       }
@@ -217,6 +239,20 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
     }
   }, []);
 
+  const handleSetMicDeviceId = useCallback((id: string) => {
+    setMicDeviceId(id);
+    setPreferredMic(id).catch((err) =>
+      console.error("Failed to persist mic preference:", err),
+    );
+  }, []);
+
+  const handleSetSystemDeviceId = useCallback((id: string) => {
+    setSystemDeviceId(id);
+    setPreferredSystemDevice(id).catch((err) =>
+      console.error("Failed to persist system device preference:", err),
+    );
+  }, []);
+
   const value: RecordingState = {
     isRecording,
     elapsedSeconds,
@@ -227,8 +263,8 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
     systemDevices,
     micDeviceId,
     systemDeviceId,
-    setMicDeviceId,
-    setSystemDeviceId,
+    setMicDeviceId: handleSetMicDeviceId,
+    setSystemDeviceId: handleSetSystemDeviceId,
     micGainValue,
     handleGainChange,
     vadThresholdValue,
