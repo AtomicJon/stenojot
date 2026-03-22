@@ -55,3 +55,83 @@ impl From<CaptureError> for String {
         e.to_string()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn capture_error_display_device_not_found() {
+        // Arrange
+        let err = CaptureError::DeviceNotFound("mic-1".to_string());
+
+        // Act
+        let msg = err.to_string();
+
+        // Assert
+        assert_eq!(msg, "Device not found: mic-1");
+    }
+
+    #[test]
+    fn capture_error_display_stream_error() {
+        // Arrange
+        let err = CaptureError::StreamError("timeout".to_string());
+
+        // Act
+        let msg = err.to_string();
+
+        // Assert
+        assert_eq!(msg, "Stream error: timeout");
+    }
+
+    #[test]
+    fn capture_error_display_already_recording() {
+        // Arrange
+        let err = CaptureError::AlreadyRecording;
+
+        // Act
+        let msg = err.to_string();
+
+        // Assert
+        assert_eq!(msg, "Already recording");
+    }
+
+    #[test]
+    fn capture_error_display_not_recording() {
+        // Arrange
+        let err = CaptureError::NotRecording;
+
+        // Act
+        let msg = err.to_string();
+
+        // Assert
+        assert_eq!(msg, "Not recording");
+    }
+
+    #[test]
+    fn capture_error_converts_to_string() {
+        // Arrange
+        let err = CaptureError::AlreadyRecording;
+
+        // Act
+        let s: String = err.into();
+
+        // Assert
+        assert_eq!(s, "Already recording");
+    }
+
+    #[test]
+    fn speaker_serializes_correctly() {
+        // Arrange
+        let me = Speaker::Me;
+        let others = Speaker::Others;
+
+        // Act
+        let me_json = serde_json::to_string(&me).unwrap();
+        let others_json = serde_json::to_string(&others).unwrap();
+
+        // Assert
+        assert_eq!(me_json, "\"Me\"");
+        assert_eq!(others_json, "\"Others\"");
+    }
+}

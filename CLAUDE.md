@@ -13,7 +13,12 @@ yarn build             # Frontend only (TypeScript + Vite)
 npx tsc --noEmit       # Type-check without emitting
 npx vite build         # Frontend bundle only
 cargo check            # Rust type-check (run from src-tauri/)
-cargo test             # Rust tests (run from src-tauri/)
+
+# Testing
+yarn test              # Run ALL tests (UI + Tauri backend)
+yarn test:ui           # Frontend tests only (vitest)
+yarn test:ui:watch     # Frontend tests in watch mode
+yarn test:tauri        # Rust backend tests only (cargo test)
 ```
 
 **Important:** Always run `nvm use` before any yarn/node commands.
@@ -77,3 +82,29 @@ SCSS modules imported as `s` (`import s from "./ComponentName.module.scss"`).
 
 - All `pub` items (functions, structs, enums, modules) must have `///` doc comments. Use `//!` at the top of each module file to describe the module's purpose and role in the architecture.
 - Inline comments (`//`) for non-obvious logic — explain _why_, not _what_. Don't comment self-explanatory code.
+
+### Testing (CRITICAL)
+
+**Every new feature, function, or component must include tests.** Tests are not optional — they are part of the definition of done. Run `yarn test` before considering any task complete.
+
+**General rules:**
+
+- All tests follow the **AAA pattern** with explicit `// Arrange`, `// Act`, `// Assert` comments in every test
+- **Minimize mocks.** Test real behavior wherever possible. Mocks are acceptable for: external services (network, PulseAudio), Tauri IPC, and cases where real setup complexity far outweighs the benefit
+- When a function is untestable in isolation because it's tightly coupled to an external dependency (e.g. `pactl`), extract the pure logic into a separate testable function (see `parse_pactl_sources` pattern in `system_capture.rs`)
+
+**Frontend tests (vitest + @testing-library/react):**
+
+- Config: `vitest.config.ts`, setup: `src/test/setup.ts`
+- Test files live next to the code they test: `ComponentName.test.tsx`, `module.test.ts`
+- Utility/lib functions (`src/lib/`): test all exported functions with edge cases (zero, negative, boundary values, roundtrip conversions)
+- Components (`src/components/`): test rendering, user interaction, prop variants, disabled states. Use `screen` queries and `fireEvent`, not implementation details
+- Do not test Tauri `invoke()` wrappers (`src/lib/commands.ts`) — those are thin typed passthroughs
+
+**Rust tests (cargo test, inline `#[cfg(test)]` modules):**
+
+- Tests live in `#[cfg(test)] mod tests` at the bottom of each source file, not in separate test files
+- Pure functions (audio pipeline, VAD, text filtering): test directly with constructed inputs
+- Functions using shared global state (e.g. `CUSTOM_MODELS_DIR` mutex): use a test-level serialization mutex to prevent parallel test interference (see `manager.rs` pattern)
+- File system tests: use `tempfile::tempdir()` for isolation — never touch real user directories
+- Audio capture callbacks: test with real `ringbuf` producers/consumers and `Arc<AtomicU32>` — no mocking needed

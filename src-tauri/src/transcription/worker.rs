@@ -359,3 +359,223 @@ fn transcribe_segment(
 
     channel.send(segment).ok();
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── is_non_speech ────────────────────────────────
+
+    #[test]
+    fn is_non_speech_detects_bracketed_silence() {
+        // Arrange
+        let text = "[silence]";
+
+        // Act
+        let result = is_non_speech(text);
+
+        // Assert
+        assert!(result);
+    }
+
+    #[test]
+    fn is_non_speech_detects_blank_audio() {
+        // Arrange
+        let text = "[BLANK_AUDIO]";
+
+        // Act
+        let result = is_non_speech(text);
+
+        // Assert
+        assert!(result);
+    }
+
+    #[test]
+    fn is_non_speech_detects_parenthesized_no_speech() {
+        // Arrange
+        let text = "(no speech detected)";
+
+        // Act
+        let result = is_non_speech(text);
+
+        // Assert
+        assert!(result);
+    }
+
+    #[test]
+    fn is_non_speech_detects_music_notes() {
+        // Arrange
+        let text = "♪ ♫ ♪";
+
+        // Act
+        let result = is_non_speech(text);
+
+        // Assert
+        assert!(result);
+    }
+
+    #[test]
+    fn is_non_speech_detects_inaudible() {
+        // Arrange
+        let text = "[inaudible]";
+
+        // Act
+        let result = is_non_speech(text);
+
+        // Assert
+        assert!(result);
+    }
+
+    #[test]
+    fn is_non_speech_detects_background_noise() {
+        // Arrange
+        let text = "(background noise)";
+
+        // Act
+        let result = is_non_speech(text);
+
+        // Assert
+        assert!(result);
+    }
+
+    #[test]
+    fn is_non_speech_allows_real_speech() {
+        // Arrange
+        let text = "Hello, how are you?";
+
+        // Act
+        let result = is_non_speech(text);
+
+        // Assert
+        assert!(!result);
+    }
+
+    #[test]
+    fn is_non_speech_allows_short_words() {
+        // Arrange
+        let text = "Yes";
+
+        // Act
+        let result = is_non_speech(text);
+
+        // Assert
+        assert!(!result);
+    }
+
+    #[test]
+    fn is_non_speech_handles_whitespace_padding() {
+        // Arrange
+        let text = "  [silence]  ";
+
+        // Act
+        let result = is_non_speech(text);
+
+        // Assert
+        assert!(result);
+    }
+
+    // ── should_transcribe ────────────────────────────
+
+    #[test]
+    fn should_transcribe_triggers_on_max_segment_length() {
+        // Arrange — buffer at exactly SEGMENT_SAMPLES (80,000)
+        let mono: Vec<f32> = vec![0.0; SEGMENT_SAMPLES];
+        let mut had_speech = false;
+        let mut silence_count = 0u32;
+        let threshold = 0.01;
+
+        // Act
+        let result = should_transcribe(&mono, &mut had_speech, &mut silence_count, threshold);
+
+        // Assert
+        assert!(result);
+    }
+
+    #[test]
+    fn should_transcribe_does_not_trigger_on_silence_only() {
+        // Arrange — short silent buffer, no prior speech
+        let mono: Vec<f32> = vec![0.0; 8000];
+        let mut had_speech = false;
+        let mut silence_count = 0u32;
+        let threshold = 0.01;
+
+        // Act
+        let result = should_transcribe(&mono, &mut had_speech, &mut silence_count, threshold);
+
+        // Assert
+        assert!(!result);
+        assert!(!had_speech);
+    }
+
+    #[test]
+    fn should_transcribe_detects_speech_in_trailing_window() {
+        // Arrange — silence followed by a loud trailing window
+        let mut mono: Vec<f32> = vec![0.0; 8000];
+        // Fill the last VAD_WINDOW samples with speech
+        let speech_start = mono.len() - VAD_WINDOW;
+        for sample in &mut mono[speech_start..] {
+            *sample = 0.5;
+        }
+        let mut had_speech = false;
+        let mut silence_count = 0u32;
+        let threshold = 0.01;
+
+        // Act
+        let result = should_transcribe(&mono, &mut had_speech, &mut silence_count, threshold);
+
+        // Assert — speech detected but holdoff not yet expired
+        assert!(!result);
+        assert!(had_speech);
+        assert_eq!(silence_count, 0);
+    }
+
+    #[test]
+    fn should_transcribe_triggers_after_silence_holdoff() {
+        // Arrange — simulate speech detected, then enough silence polls
+        let mono: Vec<f32> = vec![0.0; MIN_SEGMENT_SAMPLES]; // silent buffer
+        let mut had_speech = true; // speech was detected previously
+        let mut silence_count = SILENCE_HOLDOFF - 1; // one poll away from triggering
+        let threshold = 0.01;
+
+        // Act — this poll should push silence_count to SILENCE_HOLDOFF
+        let result = should_transcribe(&mono, &mut had_speech, &mut silence_count, threshold);
+
+        // Assert
+        assert!(result);
+        assert_eq!(silence_count, SILENCE_HOLDOFF);
+    }
+
+    #[test]
+    fn should_transcribe_resets_silence_count_on_new_speech() {
+        // Arrange — speech was detected, some silence accumulated, then speech again
+        let mut mono: Vec<f32> = vec![0.0; 8000];
+        let speech_start = mono.len() - VAD_WINDOW;
+        for sample in &mut mono[speech_start..] {
+            *sample = 0.5;
+        }
+        let mut had_speech = true;
+        let mut silence_count = 3u32;
+        let threshold = 0.01;
+
+        // Act
+        let _result = should_transcribe(&mono, &mut had_speech, &mut silence_count, threshold);
+
+        // Assert — silence count reset because speech was detected
+        assert_eq!(silence_count, 0);
+    }
+
+    #[test]
+    fn should_transcribe_does_not_trigger_below_min_segment() {
+        // Arrange — had speech + holdoff expired but buffer too short
+        let mono: Vec<f32> = vec![0.0; MIN_SEGMENT_SAMPLES - 1];
+        let mut had_speech = true;
+        let mut silence_count = SILENCE_HOLDOFF - 1;
+        let threshold = 0.01;
+
+        // Act
+        let result = should_transcribe(&mono, &mut had_speech, &mut silence_count, threshold);
+
+        // Assert — holdoff reached but buffer too short
+        assert!(!result);
+    }
+}

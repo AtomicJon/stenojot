@@ -38,9 +38,19 @@ pub fn list_monitor_sources() -> Result<Vec<AudioDevice>, CaptureError> {
         .map_err(|e| CaptureError::StreamError(format!("Failed to run pactl: {}", e)))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(parse_pactl_sources(&stdout))
+}
+
+/// Parse the tab-delimited output of `pactl list short sources` into
+/// monitor-source `AudioDevice` entries.
+///
+/// Each line is expected to have at least two tab-separated fields, where the
+/// second field is the source name. Only entries containing `.monitor` are
+/// included. The first result is marked as default.
+fn parse_pactl_sources(pactl_output: &str) -> Vec<AudioDevice> {
     let mut devices = Vec::new();
 
-    for line in stdout.lines() {
+    for line in pactl_output.lines() {
         let parts: Vec<&str> = line.split('\t').collect();
         if parts.len() >= 2 {
             let source_name = parts[1].to_string();
@@ -65,7 +75,7 @@ pub fn list_monitor_sources() -> Result<Vec<AudioDevice>, CaptureError> {
         first.is_default = true;
     }
 
-    Ok(devices)
+    devices
 }
 
 /// Handle for a running system audio capture thread.
@@ -192,5 +202,98 @@ fn capture_loop(
         for &sample in samples {
             let _ = producer.try_push(sample);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── parse_pactl_sources ──────────────────────────
+
+    #[test]
+    fn parse_pactl_sources_extracts_monitor_entries() {
+        // Arrange — realistic pactl output with a mix of sources
+        let pactl_output = "\
+1\talsa_output.pci-0000_00_1f.3.analog-stereo.monitor\tPipeWire\ts32le 2ch 48000Hz\tIDLE
+2\talsa_input.pci-0000_00_1f.3.analog-stereo\tPipeWire\ts32le 2ch 48000Hz\tSUSPENDED";
+
+        // Act
+        let devices = parse_pactl_sources(pactl_output);
+
+        // Assert — only the .monitor entry should be included
+        assert_eq!(devices.len(), 1);
+        assert_eq!(
+            devices[0].id,
+            "alsa_output.pci-0000_00_1f.3.analog-stereo.monitor"
+        );
+        assert!(devices[0].is_default);
+    }
+
+    #[test]
+    fn parse_pactl_sources_builds_readable_display_name() {
+        // Arrange
+        let pactl_output =
+            "1\talsa_output.usb-device.analog-stereo.monitor\tPipeWire\ts32le 2ch 48000Hz\tIDLE";
+
+        // Act
+        let devices = parse_pactl_sources(pactl_output);
+
+        // Assert — alsa_output. and .monitor stripped, dots/dashes become spaces
+        assert_eq!(devices[0].name, "usb device analog stereo");
+    }
+
+    #[test]
+    fn parse_pactl_sources_marks_first_as_default() {
+        // Arrange
+        let pactl_output = "\
+1\toutput1.monitor\tPipeWire\ts32le 2ch 48000Hz\tIDLE
+2\toutput2.monitor\tPipeWire\ts32le 2ch 48000Hz\tIDLE";
+
+        // Act
+        let devices = parse_pactl_sources(pactl_output);
+
+        // Assert
+        assert_eq!(devices.len(), 2);
+        assert!(devices[0].is_default);
+        assert!(!devices[1].is_default);
+    }
+
+    #[test]
+    fn parse_pactl_sources_returns_empty_for_no_monitors() {
+        // Arrange — only input sources, no monitors
+        let pactl_output =
+            "1\talsa_input.pci-0000_00_1f.3.analog-stereo\tPipeWire\ts32le 2ch 48000Hz\tIDLE";
+
+        // Act
+        let devices = parse_pactl_sources(pactl_output);
+
+        // Assert
+        assert!(devices.is_empty());
+    }
+
+    #[test]
+    fn parse_pactl_sources_handles_empty_output() {
+        // Arrange
+        let pactl_output = "";
+
+        // Act
+        let devices = parse_pactl_sources(pactl_output);
+
+        // Assert
+        assert!(devices.is_empty());
+    }
+
+    #[test]
+    fn parse_pactl_sources_ignores_malformed_lines() {
+        // Arrange — line with only one field (no tabs)
+        let pactl_output = "malformed_line_without_tabs\n1\tvalid.monitor\tPW\ts32le\tIDLE";
+
+        // Act
+        let devices = parse_pactl_sources(pactl_output);
+
+        // Assert — only the valid line should be parsed
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].id, "valid.monitor");
     }
 }

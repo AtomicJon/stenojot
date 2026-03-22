@@ -172,3 +172,198 @@ pub fn download_model_file(model_name: &str) -> Result<PathBuf, String> {
     eprintln!("Model saved to {}", path.display());
     Ok(path)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::sync::MutexGuard;
+
+    /// Serializes manager tests that mutate the global CUSTOM_MODELS_DIR.
+    static TEST_MUTEX: Mutex<()> = Mutex::new(());
+
+    /// Acquire the test lock and set a temporary models dir.
+    /// Returns the lock guard — the custom dir is cleared when dropped.
+    fn lock_with_temp_dir(dir: &std::path::Path) -> MutexGuard<'static, ()> {
+        let guard = TEST_MUTEX.lock().unwrap();
+        let mut lock = CUSTOM_MODELS_DIR.lock().unwrap();
+        *lock = Some(dir.to_path_buf());
+        guard
+    }
+
+    /// Clear the custom models dir (call before dropping the test guard).
+    fn clear_custom_dir() {
+        let mut lock = CUSTOM_MODELS_DIR.lock().unwrap();
+        *lock = None;
+    }
+
+    #[test]
+    fn get_model_path_uses_expected_filename() {
+        // Arrange
+        let tmp = tempfile::tempdir().unwrap();
+        let _guard = lock_with_temp_dir(tmp.path());
+
+        // Act
+        let path = get_model_path("base");
+
+        // Assert
+        assert_eq!(path.file_name().unwrap(), "ggml-base.bin");
+        assert_eq!(path.parent().unwrap(), tmp.path());
+
+        // Cleanup
+        clear_custom_dir();
+    }
+
+    #[test]
+    fn model_exists_returns_false_when_missing() {
+        // Arrange
+        let tmp = tempfile::tempdir().unwrap();
+        let _guard = lock_with_temp_dir(tmp.path());
+
+        // Act
+        let exists = model_exists("base");
+
+        // Assert
+        assert!(!exists);
+
+        // Cleanup
+        clear_custom_dir();
+    }
+
+    #[test]
+    fn model_exists_returns_true_when_present() {
+        // Arrange
+        let tmp = tempfile::tempdir().unwrap();
+        let _guard = lock_with_temp_dir(tmp.path());
+        let model_path = tmp.path().join("ggml-base.bin");
+        fs::write(&model_path, b"fake model data").unwrap();
+
+        // Act
+        let exists = model_exists("base");
+
+        // Assert
+        assert!(exists);
+
+        // Cleanup
+        clear_custom_dir();
+    }
+
+    #[test]
+    fn get_model_info_reflects_download_status() {
+        // Arrange
+        let tmp = tempfile::tempdir().unwrap();
+        let _guard = lock_with_temp_dir(tmp.path());
+
+        // Act — model not downloaded
+        let info_missing = get_model_info("base");
+
+        // Assert
+        assert!(!info_missing.downloaded);
+        assert_eq!(info_missing.size_bytes, 0);
+        assert_eq!(info_missing.name, "base");
+
+        // Arrange — create a fake model file
+        let model_path = tmp.path().join("ggml-base.bin");
+        let fake_data = vec![0u8; 1024];
+        fs::write(&model_path, &fake_data).unwrap();
+
+        // Act — model is now present
+        let info_present = get_model_info("base");
+
+        // Assert
+        assert!(info_present.downloaded);
+        assert_eq!(info_present.size_bytes, 1024);
+
+        // Cleanup
+        clear_custom_dir();
+    }
+
+    #[test]
+    fn delete_model_removes_file() {
+        // Arrange
+        let tmp = tempfile::tempdir().unwrap();
+        let _guard = lock_with_temp_dir(tmp.path());
+        let model_path = tmp.path().join("ggml-base.bin");
+        fs::write(&model_path, b"fake model").unwrap();
+        assert!(model_path.exists());
+
+        // Act
+        let result = delete_model("base");
+
+        // Assert
+        assert!(result.is_ok());
+        assert!(!model_path.exists());
+
+        // Cleanup
+        clear_custom_dir();
+    }
+
+    #[test]
+    fn delete_model_returns_error_when_missing() {
+        // Arrange
+        let tmp = tempfile::tempdir().unwrap();
+        let _guard = lock_with_temp_dir(tmp.path());
+
+        // Act
+        let result = delete_model("base");
+
+        // Assert
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("does not exist"));
+
+        // Cleanup
+        clear_custom_dir();
+    }
+
+    #[test]
+    fn set_models_dir_creates_directory() {
+        // Arrange
+        let tmp = tempfile::tempdir().unwrap();
+        let new_dir = tmp.path().join("custom_models");
+        assert!(!new_dir.exists());
+
+        // Act
+        let result = set_models_dir(new_dir.clone());
+
+        // Assert
+        assert!(result.is_ok());
+        assert!(new_dir.exists());
+
+        // Verify it's being used
+        let current = get_models_dir();
+        assert_eq!(current, new_dir);
+
+        // Cleanup
+        clear_custom_dir();
+    }
+
+    #[test]
+    fn reset_models_dir_clears_custom_path() {
+        // Arrange
+        let tmp = tempfile::tempdir().unwrap();
+        let _guard = lock_with_temp_dir(tmp.path());
+        assert_eq!(get_models_dir(), tmp.path());
+
+        // Act
+        reset_models_dir();
+
+        // Assert — should fall back to default
+        let dir = get_models_dir();
+        assert_ne!(dir, tmp.path());
+    }
+
+    #[test]
+    fn get_download_url_formats_correctly() {
+        // Arrange
+        let model_name = "base";
+
+        // Act
+        let url = get_download_url(model_name);
+
+        // Assert
+        assert_eq!(
+            url,
+            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
+        );
+    }
+}

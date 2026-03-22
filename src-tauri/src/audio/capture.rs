@@ -182,3 +182,114 @@ fn capture_callback_with_gain(
         rms_level.store(rms.to_bits(), Ordering::Relaxed);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ringbuf::traits::{Consumer as _, Split};
+    use ringbuf::HeapRb;
+
+    // ── capture_callback_with_gain ───────────────────
+
+    #[test]
+    fn callback_applies_unity_gain() {
+        // Arrange
+        let rb = HeapRb::<f32>::new(1024);
+        let (mut producer, mut consumer) = rb.split();
+        let rms_level = Arc::new(AtomicU32::new(0));
+        let gain = Arc::new(AtomicU32::new(1.0f32.to_bits()));
+        let data = vec![0.5f32; 100];
+
+        // Act
+        capture_callback_with_gain(&data, &mut producer, &rms_level, &gain);
+
+        // Assert — samples should pass through unchanged
+        let mut output = Vec::new();
+        while let Some(s) = consumer.try_pop() {
+            output.push(s);
+        }
+        assert_eq!(output.len(), 100);
+        for &s in &output {
+            assert!((s - 0.5).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn callback_applies_gain_multiplier() {
+        // Arrange
+        let rb = HeapRb::<f32>::new(1024);
+        let (mut producer, mut consumer) = rb.split();
+        let rms_level = Arc::new(AtomicU32::new(0));
+        let gain = Arc::new(AtomicU32::new(2.0f32.to_bits()));
+        let data = vec![0.3f32; 100];
+
+        // Act
+        capture_callback_with_gain(&data, &mut producer, &rms_level, &gain);
+
+        // Assert — 0.3 * 2.0 = 0.6
+        let mut output = Vec::new();
+        while let Some(s) = consumer.try_pop() {
+            output.push(s);
+        }
+        for &s in &output {
+            assert!((s - 0.6).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn callback_clamps_gained_samples_to_minus_one_to_one() {
+        // Arrange — high gain should clip
+        let rb = HeapRb::<f32>::new(1024);
+        let (mut producer, mut consumer) = rb.split();
+        let rms_level = Arc::new(AtomicU32::new(0));
+        let gain = Arc::new(AtomicU32::new(10.0f32.to_bits()));
+        let data = vec![0.5f32; 50];
+
+        // Act
+        capture_callback_with_gain(&data, &mut producer, &rms_level, &gain);
+
+        // Assert — 0.5 * 10.0 = 5.0, clamped to 1.0
+        let mut output = Vec::new();
+        while let Some(s) = consumer.try_pop() {
+            output.push(s);
+        }
+        for &s in &output {
+            assert!((s - 1.0).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn callback_updates_rms_level() {
+        // Arrange
+        let rb = HeapRb::<f32>::new(1024);
+        let (mut producer, _consumer) = rb.split();
+        let rms_level = Arc::new(AtomicU32::new(0));
+        let gain = Arc::new(AtomicU32::new(1.0f32.to_bits()));
+        // Constant 0.5 → RMS = 0.5
+        let data = vec![0.5f32; 100];
+
+        // Act
+        capture_callback_with_gain(&data, &mut producer, &rms_level, &gain);
+
+        // Assert
+        let stored_rms = f32::from_bits(rms_level.load(Ordering::Relaxed));
+        assert!((stored_rms - 0.5).abs() < 1e-3);
+    }
+
+    #[test]
+    fn callback_does_not_update_rms_for_empty_data() {
+        // Arrange
+        let rb = HeapRb::<f32>::new(1024);
+        let (mut producer, _consumer) = rb.split();
+        let sentinel = 42u32;
+        let rms_level = Arc::new(AtomicU32::new(sentinel));
+        let gain = Arc::new(AtomicU32::new(1.0f32.to_bits()));
+        let data: Vec<f32> = vec![];
+
+        // Act
+        capture_callback_with_gain(&data, &mut producer, &rms_level, &gain);
+
+        // Assert — sentinel value should be unchanged
+        assert_eq!(rms_level.load(Ordering::Relaxed), sentinel);
+    }
+}
