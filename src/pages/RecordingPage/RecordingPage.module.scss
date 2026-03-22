@@ -122,6 +122,41 @@
   color: $color-text;
 }
 
+// ── Gain slider ────────────────────────────────
+.gainSlider {
+  width: 100%;
+  height: $level-bar-height;
+  appearance: none;
+  background: $color-bg;
+  border-radius: $radius-5;
+  outline: none;
+  cursor: pointer;
+
+  &::-webkit-slider-thumb {
+    appearance: none;
+    width: $space-16;
+    height: $space-16;
+    border-radius: $radius-round;
+    background: $color-accent;
+    cursor: pointer;
+  }
+
+  &::-moz-range-thumb {
+    width: $space-16;
+    height: $space-16;
+    border-radius: $radius-round;
+    background: $color-accent;
+    border: none;
+    cursor: pointer;
+  }
+
+  &::-moz-range-track {
+    height: $level-bar-height;
+    background: $color-bg;
+    border-radius: $radius-5;
+  }
+}
+
 // ── Controls ────────────────────────────────────
 .controlsPanel {
   display: flex;
@@ -203,6 +238,17 @@
   background-color: $color-bg;
   border-radius: $radius-5;
   overflow: hidden;
+  position: relative;
+}
+
+.thresholdMarker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: $border-1;
+  background-color: $color-warning;
+  opacity: 0.8;
+  pointer-events: none;
 }
 
 .levelBarFill {
@@ -236,9 +282,10 @@
 // ── Transcript panel ────────────────────────────
 .transcriptPanel {
   flex: 1;
-  min-height: $transcript-min-height;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .transcriptPlaceholder {
@@ -257,7 +304,6 @@
   display: flex;
   flex-direction: column;
   gap: $space-8;
-  max-height: $transcript-max-height;
   overflow-y: auto;
   padding-right: $space-4;
 }

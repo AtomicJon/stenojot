@@ -7,6 +7,7 @@ use tauri::ipc::Channel;
 use tauri::State;
 
 use crate::audio::capture;
+use crate::audio::pipeline;
 use crate::audio::system_capture::{self, SystemCaptureHandle};
 use crate::audio::types::{AudioDevice, AudioLevels, CaptureError, TranscriptSegment};
 use crate::transcription::manager::{self, ModelInfo};
@@ -19,6 +20,8 @@ pub struct AppState {
     pub system_device_id: Option<String>,
     pub mic_rms: Arc<AtomicU32>,
     pub system_rms: Arc<AtomicU32>,
+    pub mic_gain: Arc<AtomicU32>,
+    pub vad_threshold: Arc<AtomicU32>,
     pub mic_stream: Option<Stream>,
     pub system_capture: Option<SystemCaptureHandle>,
     pub worker: Option<TranscriptionWorker>,
@@ -44,6 +47,10 @@ impl AppState {
             system_device_id: None,
             mic_rms: Arc::new(AtomicU32::new(0)),
             system_rms: Arc::new(AtomicU32::new(0)),
+            mic_gain: Arc::new(AtomicU32::new(1.0f32.to_bits())),
+            vad_threshold: Arc::new(AtomicU32::new(
+                pipeline::DEFAULT_VAD_THRESHOLD.to_bits(),
+            )),
             mic_stream: None,
             system_capture: None,
             worker: None,
@@ -95,8 +102,10 @@ pub fn start_recording(
     }
     let model_path = manager::get_model_path(model_name);
 
-    // Start mic capture
-    let mic_handle = capture::start_capture(&mic_device_id).map_err(|e| e.to_string())?;
+    // Start mic capture with current gain setting
+    let mic_handle =
+        capture::start_capture(&mic_device_id, Arc::clone(&app_state.mic_gain))
+            .map_err(|e| e.to_string())?;
     app_state.mic_rms = mic_handle.rms_level;
     app_state.mic_sample_rate = mic_handle.sample_rate;
     app_state.mic_channels = mic_handle.channels;
@@ -123,6 +132,7 @@ pub fn start_recording(
         app_state.mic_channels,
         app_state.system_sample_rate,
         app_state.system_channels,
+        Arc::clone(&app_state.vad_threshold),
         on_transcript,
     )?;
 
@@ -182,6 +192,48 @@ pub fn get_audio_levels(state: State<'_, Mutex<AppState>>) -> Result<AudioLevels
         mic_rms,
         system_rms,
     })
+}
+
+/// Set the microphone gain multiplier (1.0 = unity, 2.0 = double, etc.).
+///
+/// Takes effect immediately — the gain is applied in the audio capture callback,
+/// so it affects both the level meter and the audio sent to Whisper.
+#[tauri::command]
+pub fn set_mic_gain(gain: f32, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
+    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let clamped = gain.clamp(0.1, 10.0);
+    app_state.mic_gain.store(clamped.to_bits(), Ordering::Relaxed);
+    Ok(())
+}
+
+/// Get the current microphone gain multiplier.
+#[tauri::command]
+pub fn get_mic_gain(state: State<'_, Mutex<AppState>>) -> Result<f32, String> {
+    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    Ok(f32::from_bits(app_state.mic_gain.load(Ordering::Relaxed)))
+}
+
+/// Set the VAD (voice activity detection) sensitivity threshold.
+///
+/// Lower values detect quieter speech; higher values require louder input.
+/// Takes effect immediately during recording.
+#[tauri::command]
+pub fn set_vad_threshold(threshold: f32, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
+    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let clamped = threshold.clamp(0.0005, 0.1);
+    app_state
+        .vad_threshold
+        .store(clamped.to_bits(), Ordering::Relaxed);
+    Ok(())
+}
+
+/// Get the current VAD sensitivity threshold.
+#[tauri::command]
+pub fn get_vad_threshold(state: State<'_, Mutex<AppState>>) -> Result<f32, String> {
+    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    Ok(f32::from_bits(
+        app_state.vad_threshold.load(Ordering::Relaxed),
+    ))
 }
 
 /// Get detailed info about the Whisper model (path, size, download status).

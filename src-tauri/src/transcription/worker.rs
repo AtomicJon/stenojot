@@ -6,7 +6,7 @@
 //! silence is detected after speech), it runs Whisper inference and sends
 //! the resulting `TranscriptSegment` to the frontend via a Tauri `Channel`.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
@@ -57,6 +57,7 @@ impl TranscriptionWorker {
         mic_channels: u16,
         system_sample_rate: u32,
         system_channels: u16,
+        vad_threshold: Arc<AtomicU32>,
         channel: Channel<TranscriptSegment>,
     ) -> Result<Self, String> {
         let running = Arc::new(AtomicBool::new(true));
@@ -72,6 +73,7 @@ impl TranscriptionWorker {
                 mic_channels,
                 system_sample_rate,
                 system_channels,
+                vad_threshold,
                 channel,
             );
         });
@@ -101,6 +103,7 @@ fn worker_loop(
     mic_channels: u16,
     system_sample_rate: u32,
     system_channels: u16,
+    vad_threshold: Arc<AtomicU32>,
     channel: Channel<TranscriptSegment>,
 ) {
     // Load the Whisper model once for the lifetime of the worker
@@ -128,8 +131,12 @@ fn worker_loop(
     // Track whether we've seen speech in the current segment
     let mut mic_had_speech = false;
     let mut system_had_speech = false;
+    let mut mic_silence_count: u32 = 0;
+    let mut system_silence_count: u32 = 0;
 
     while running.load(Ordering::SeqCst) {
+        let threshold = f32::from_bits(vad_threshold.load(Ordering::Relaxed));
+
         // Drain mic ring buffer
         drain_consumer(&mut mic_consumer, &mut mic_raw_buf);
 
@@ -138,37 +145,43 @@ fn worker_loop(
 
         // Process mic segment
         let mic_mono = pipeline::process_buffer(&mic_raw_buf, mic_sample_rate, mic_channels);
-        if should_transcribe(&mic_mono, &mut mic_had_speech) {
+        if should_transcribe(&mic_mono, &mut mic_had_speech, &mut mic_silence_count, threshold) {
             let elapsed_ms = recording_start.elapsed().as_millis() as u64;
-            transcribe_segment(
-                &ctx,
-                &mic_mono,
-                Speaker::Me,
-                mic_segment_start_ms,
-                elapsed_ms,
-                &channel,
-            );
+            if mic_had_speech {
+                transcribe_segment(
+                    &ctx,
+                    &mic_mono,
+                    Speaker::Me,
+                    mic_segment_start_ms,
+                    elapsed_ms,
+                    &channel,
+                );
+            }
             mic_raw_buf.clear();
             mic_segment_start_ms = elapsed_ms;
             mic_had_speech = false;
+            mic_silence_count = 0;
         }
 
         // Process system segment
         let system_mono =
             pipeline::process_buffer(&system_raw_buf, system_sample_rate, system_channels);
-        if should_transcribe(&system_mono, &mut system_had_speech) {
+        if should_transcribe(&system_mono, &mut system_had_speech, &mut system_silence_count, threshold) {
             let elapsed_ms = recording_start.elapsed().as_millis() as u64;
-            transcribe_segment(
-                &ctx,
-                &system_mono,
-                Speaker::Others,
-                system_segment_start_ms,
-                elapsed_ms,
-                &channel,
-            );
+            if system_had_speech {
+                transcribe_segment(
+                    &ctx,
+                    &system_mono,
+                    Speaker::Others,
+                    system_segment_start_ms,
+                    elapsed_ms,
+                    &channel,
+                );
+            }
             system_raw_buf.clear();
             system_segment_start_ms = elapsed_ms;
             system_had_speech = false;
+            system_silence_count = 0;
         }
 
         thread::sleep(std::time::Duration::from_millis(POLL_INTERVAL_MS));
@@ -176,9 +189,10 @@ fn worker_loop(
 
     // Flush any remaining audio in both buffers
     let elapsed_ms = recording_start.elapsed().as_millis() as u64;
+    let threshold = f32::from_bits(vad_threshold.load(Ordering::Relaxed));
 
     let mic_mono = pipeline::process_buffer(&mic_raw_buf, mic_sample_rate, mic_channels);
-    if !mic_mono.is_empty() && pipeline::is_speech(&mic_mono) {
+    if !mic_mono.is_empty() && pipeline::is_speech(&mic_mono, threshold) {
         transcribe_segment(
             &ctx,
             &mic_mono,
@@ -191,7 +205,7 @@ fn worker_loop(
 
     let system_mono =
         pipeline::process_buffer(&system_raw_buf, system_sample_rate, system_channels);
-    if !system_mono.is_empty() && pipeline::is_speech(&system_mono) {
+    if !system_mono.is_empty() && pipeline::is_speech(&system_mono, threshold) {
         transcribe_segment(
             &ctx,
             &system_mono,
@@ -210,27 +224,81 @@ fn drain_consumer(consumer: &mut HeapCons<f32>, buf: &mut Vec<f32>) {
     }
 }
 
+/// Size of the trailing window used for VAD checks (~100ms at 16 kHz).
+const VAD_WINDOW: usize = 1_600;
+
+/// Minimum buffer length before we'll send a segment for transcription
+/// (~0.25 seconds at 16 kHz). Short words like "yes" can be under 0.3s,
+/// so we keep this low and let Whisper handle the decoding.
+const MIN_SEGMENT_SAMPLES: usize = 4_000;
+
+/// Number of consecutive silent polls required before cutting a segment.
+/// At 100ms poll interval, 5 polls = 500ms of silence before we decide
+/// the speaker has stopped. This prevents cutting mid-word on brief pauses.
+const SILENCE_HOLDOFF: u32 = 5;
+
 /// Decide whether the accumulated 16 kHz mono buffer is ready to transcribe.
 ///
-/// Triggers when the buffer reaches the segment length threshold, or when
-/// silence is detected after a period of speech (allowing shorter natural
-/// segments).
-fn should_transcribe(mono_16k: &[f32], had_speech: &mut bool) -> bool {
+/// Uses a trailing window for VAD so short utterances are detected even
+/// when surrounded by silence. A silence holdoff counter prevents cutting
+/// segments on brief pauses between words.
+///
+/// Triggers on:
+/// 1. Buffer reaching the max segment length (~5 seconds).
+/// 2. Sustained silence after speech (holdoff expired, minimum buffer met).
+fn should_transcribe(
+    mono_16k: &[f32],
+    had_speech: &mut bool,
+    silence_count: &mut u32,
+    threshold: f32,
+) -> bool {
     if mono_16k.len() >= SEGMENT_SAMPLES {
         return true;
     }
 
-    let has_speech_now = pipeline::is_speech(mono_16k);
+    // Check only the trailing window for speech, not the entire buffer.
+    // This prevents short words from being diluted by surrounding silence.
+    let window_start = mono_16k.len().saturating_sub(VAD_WINDOW);
+    let has_speech_now = pipeline::is_speech(&mono_16k[window_start..], threshold);
+
     if has_speech_now {
         *had_speech = true;
+        *silence_count = 0;
+    } else if *had_speech {
+        *silence_count += 1;
     }
 
-    // Silence after speech with a reasonable minimum length (~1 second)
-    if *had_speech && !has_speech_now && mono_16k.len() >= 16_000 {
+    // Only cut the segment after sustained silence following speech
+    if *had_speech && *silence_count >= SILENCE_HOLDOFF && mono_16k.len() >= MIN_SEGMENT_SAMPLES {
         return true;
     }
 
     false
+}
+
+/// Check whether Whisper output is a non-speech artifact (silence markers,
+/// blank audio tags, music notes, etc.) that should be discarded.
+fn is_non_speech(text: &str) -> bool {
+    let lower = text.trim().to_lowercase();
+    // Strip surrounding brackets/parens for matching
+    let inner = lower
+        .trim_start_matches(['[', '('])
+        .trim_end_matches([']', ')'])
+        .trim();
+
+    matches!(
+        inner,
+        "silence"
+            | "blank_audio"
+            | "blank audio"
+            | "no speech"
+            | "no speech detected"
+            | "inaudible"
+            | "background noise"
+    ) || inner.contains("blank_audio")
+        || inner.contains("no speech")
+        // Whisper sometimes outputs musical note characters for non-speech audio
+        || lower.chars().all(|c| c == '♪' || c == '♫' || c.is_whitespace())
 }
 
 /// Run Whisper inference on a 16 kHz mono audio segment and send the result
@@ -277,7 +345,7 @@ fn transcribe_segment(
     }
 
     let text = text_parts.join(" ");
-    if text.is_empty() {
+    if text.is_empty() || is_non_speech(&text) {
         return;
     }
 

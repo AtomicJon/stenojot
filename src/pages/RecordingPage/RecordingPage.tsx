@@ -7,6 +7,10 @@ import {
   stopRecording,
   getAudioLevels,
   getModelInfo,
+  getMicGain,
+  setMicGain,
+  getVadThreshold,
+  setVadThreshold,
 } from "../../lib/commands";
 import type { AudioDevice, AudioLevels, TranscriptSegment } from "../../types";
 import s from "./RecordingPage.module.scss";
@@ -36,6 +40,8 @@ export function RecordingPage() {
   });
   const [segments, setSegments] = useState<TranscriptSegment[]>([]);
   const [modelReady, setModelReady] = useState(false);
+  const [micGainValue, setMicGainValue] = useState(1.0);
+  const [vadThresholdValue, setVadThresholdValue] = useState(0.005);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const levelPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -65,6 +71,14 @@ export function RecordingPage() {
         setSystemDeviceId(defaultSys?.id ?? sysDevs[0]?.id ?? "");
       } catch (err) {
         console.error("Failed to get system audio devices:", err);
+      }
+
+      try {
+        const [gain, vad] = await Promise.all([getMicGain(), getVadThreshold()]);
+        setMicGainValue(gain);
+        setVadThresholdValue(vad);
+      } catch (err) {
+        console.error("Failed to get audio settings:", err);
       }
 
       try {
@@ -132,19 +146,55 @@ export function RecordingPage() {
     }
   }, []);
 
+  /** Update mic gain on the backend and local state. */
+  const handleGainChange = useCallback(async (value: number) => {
+    setMicGainValue(value);
+    try {
+      await setMicGain(value);
+    } catch (err) {
+      console.error("Failed to set mic gain:", err);
+    }
+  }, []);
+
+  /** Update VAD sensitivity threshold on the backend and local state. */
+  const handleVadChange = useCallback(async (value: number) => {
+    setVadThresholdValue(value);
+    try {
+      await setVadThreshold(value);
+    } catch (err) {
+      console.error("Failed to set VAD threshold:", err);
+    }
+  }, []);
+
   const formatTime = (totalSeconds: number): string => {
     const mins = Math.floor(totalSeconds / 60);
     const secs = totalSeconds % 60;
     return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
   };
 
-  const getLevelPercent = (value: number): number => {
-    return Math.min(Math.max(value * 100, 0), 100);
+  const minDb = -60;
+
+  /**
+   * Convert linear RMS (0.0–1.0) to a perceptual dB-based percentage (0–100).
+   * Maps -60 dB → 0% and 0 dB → 100%.
+   */
+  const getLevelPercent = (rms: number): number => {
+    if (rms <= 0) return 0;
+    const db = 20 * Math.log10(rms);
+    const percent = ((db - minDb) / (0 - minDb)) * 100;
+    return Math.min(Math.max(percent, 0), 100);
   };
 
-  const getLevelVariant = (value: number): string => {
-    if (value < 0.33) return s.levelLow;
-    if (value < 0.66) return s.levelMid;
+  /** Convert a dB-scale percentage (0–100) back to linear RMS. */
+  const rmsFromPercent = (pct: number): number => {
+    const db = minDb + (pct / 100) * (0 - minDb);
+    return Math.pow(10, db / 20);
+  };
+
+  const getLevelVariant = (rms: number): string => {
+    const pct = getLevelPercent(rms);
+    if (pct < 50) return s.levelLow;
+    if (pct < 80) return s.levelMid;
     return s.levelHigh;
   };
 
@@ -173,7 +223,7 @@ export function RecordingPage() {
         </div>
       )}
 
-      {/* Device Selection */}
+      {/* Device Selection — hidden during recording */}
       {!isRecording && (
         <section className={s.panel}>
           <h2>Audio Sources</h2>
@@ -210,6 +260,41 @@ export function RecordingPage() {
         </section>
       )}
 
+      {/* Audio Tuning — always visible so you can adjust during recording */}
+      <section className={s.panel}>
+        <h2>Audio Tuning</h2>
+        <div className={s.deviceSelectors}>
+          <label className={s.deviceLabel}>
+            <span>Mic Gain ({micGainValue.toFixed(1)}x)</span>
+            <input
+              type="range"
+              min="0.1"
+              max="10"
+              step="0.1"
+              value={micGainValue}
+              onChange={(e) => handleGainChange(parseFloat(e.target.value))}
+              className={s.gainSlider}
+            />
+          </label>
+          <label className={s.deviceLabel}>
+            <span>
+              Detection Threshold ({Math.round(getLevelPercent(vadThresholdValue))}%)
+            </span>
+            <input
+              type="range"
+              min="1"
+              max="60"
+              step="1"
+              value={Math.round(getLevelPercent(vadThresholdValue))}
+              onChange={(e) =>
+                handleVadChange(rmsFromPercent(parseFloat(e.target.value)))
+              }
+              className={s.gainSlider}
+            />
+          </label>
+        </div>
+      </section>
+
       {/* Controls */}
       <section className={`${s.panel} ${s.controlsPanel}`}>
         <button
@@ -234,6 +319,10 @@ export function RecordingPage() {
               <div
                 className={`${s.levelBarFill} ${getLevelVariant(audioLevels.mic_rms)}`}
                 style={{ width: `${getLevelPercent(audioLevels.mic_rms)}%` }}
+              />
+              <div
+                className={s.thresholdMarker}
+                style={{ left: `${getLevelPercent(vadThresholdValue)}%` }}
               />
             </div>
             <span className={s.levelValue}>

@@ -9,7 +9,9 @@ use rubato::{
 
 const TARGET_SAMPLE_RATE: u32 = 16_000;
 const CHUNK_SIZE: usize = 1024;
-const VAD_THRESHOLD: f32 = 0.01;
+/// Default VAD threshold — used as the initial value when no custom
+/// threshold has been configured.
+pub const DEFAULT_VAD_THRESHOLD: f32 = 0.005;
 
 /// Resample audio from the source sample rate and channel count to 16 kHz mono.
 ///
@@ -87,12 +89,12 @@ pub fn process_buffer(input: &[f32], from_sample_rate: u32, from_channels: u16) 
 }
 
 /// Simple energy-based Voice Activity Detection.
-/// Returns true if the RMS energy of the chunk exceeds the threshold.
-pub fn is_speech(chunk: &[f32]) -> bool {
+/// Returns true if the RMS energy of the chunk exceeds the given threshold.
+pub fn is_speech(chunk: &[f32], threshold: f32) -> bool {
     if chunk.is_empty() {
         return false;
     }
     let sum_sq: f32 = chunk.iter().map(|&s| s * s).sum();
     let rms = (sum_sq / chunk.len() as f32).sqrt();
-    rms > VAD_THRESHOLD
+    rms > threshold
 }

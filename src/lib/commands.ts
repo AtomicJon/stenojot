@@ -42,6 +42,33 @@ export function getAudioLevels(): Promise<AudioLevels> {
   return invoke<AudioLevels>("get_audio_levels");
 }
 
+/**
+ * Set the microphone gain multiplier (0.1–10.0). Takes effect immediately.
+ * @param gain - Gain multiplier (1.0 = unity, 2.0 = double volume)
+ */
+export function setMicGain(gain: number): Promise<void> {
+  return invoke("set_mic_gain", { gain });
+}
+
+/** Get the current microphone gain multiplier. */
+export function getMicGain(): Promise<number> {
+  return invoke<number>("get_mic_gain");
+}
+
+/**
+ * Set the VAD (voice activity detection) sensitivity threshold.
+ * Lower values detect quieter speech (0.0005–0.1).
+ * @param threshold - RMS threshold value
+ */
+export function setVadThreshold(threshold: number): Promise<void> {
+  return invoke("set_vad_threshold", { threshold });
+}
+
+/** Get the current VAD sensitivity threshold. */
+export function getVadThreshold(): Promise<number> {
+  return invoke<number>("get_vad_threshold");
+}
+
 /** Retrieve detailed information about the Whisper transcription model. */
 export function getModelInfo(): Promise<ModelInfo> {
   return invoke<ModelInfo>("get_model_info");

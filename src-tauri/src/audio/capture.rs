@@ -69,10 +69,13 @@ pub struct CaptureHandle {
 
 /// Start capturing audio from the specified device.
 ///
-/// Returns a `CaptureHandle` containing the stream, sample rate info,
-/// an atomic RMS level for UI metering, and a ring buffer consumer
-/// for reading captured samples.
-pub fn start_capture(device_id: &str) -> Result<CaptureHandle, CaptureError> {
+/// The `gain` parameter is a shared atomic f32 (stored as u32 bits) that
+/// scales the captured samples in real time. A value of 1.0 is unity gain.
+/// It can be changed while recording to adjust sensitivity on the fly.
+pub fn start_capture(
+    device_id: &str,
+    gain: Arc<AtomicU32>,
+) -> Result<CaptureHandle, CaptureError> {
     let device = find_device_by_id(device_id)?;
 
     let config = device
@@ -97,11 +100,13 @@ pub fn start_capture(device_id: &str) -> Result<CaptureHandle, CaptureError> {
         eprintln!("Audio stream error: {}", err);
     };
 
+    // Each match arm moves producer/rms_level_clone/gain into a closure,
+    // so we must prepare separate clones for each arm up front.
     let stream = match config.sample_format() {
         SampleFormat::F32 => device.build_input_stream(
             &stream_config,
             move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                capture_callback(data, &mut producer, &rms_level_clone);
+                capture_callback_with_gain(data, &mut producer, &rms_level_clone, &gain);
             },
             err_fn,
             None,
@@ -113,7 +118,7 @@ pub fn start_capture(device_id: &str) -> Result<CaptureHandle, CaptureError> {
                     .iter()
                     .map(|&s| s as f32 / i16::MAX as f32)
                     .collect();
-                capture_callback(&float_data, &mut producer, &rms_level_clone);
+                capture_callback_with_gain(&float_data, &mut producer, &rms_level_clone, &gain);
             },
             err_fn,
             None,
@@ -125,7 +130,7 @@ pub fn start_capture(device_id: &str) -> Result<CaptureHandle, CaptureError> {
                     .iter()
                     .map(|&s| (s as f32 / u16::MAX as f32) * 2.0 - 1.0)
                     .collect();
-                capture_callback(&float_data, &mut producer, &rms_level_clone);
+                capture_callback_with_gain(&float_data, &mut producer, &rms_level_clone, &gain);
             },
             err_fn,
             None,
@@ -153,23 +158,27 @@ pub fn start_capture(device_id: &str) -> Result<CaptureHandle, CaptureError> {
 }
 
 /// Callback invoked by cpal for each audio buffer.
-/// Pushes samples into the ring buffer and updates the RMS level.
-fn capture_callback(
+/// Applies gain, pushes samples into the ring buffer, and updates RMS level.
+fn capture_callback_with_gain(
     data: &[f32],
     producer: &mut ringbuf::HeapProd<f32>,
     rms_level: &Arc<AtomicU32>,
+    gain: &Arc<AtomicU32>,
 ) {
     use ringbuf::traits::Producer as _;
 
-    // Compute RMS for this buffer
-    if !data.is_empty() {
-        let sum_sq: f32 = data.iter().map(|&s| s * s).sum();
-        let rms = (sum_sq / data.len() as f32).sqrt();
-        rms_level.store(rms.to_bits(), Ordering::Relaxed);
+    let g = f32::from_bits(gain.load(Ordering::Relaxed));
+
+    // Compute RMS and push gained samples into ring buffer
+    let mut sum_sq: f32 = 0.0;
+    for &sample in data {
+        let gained = (sample * g).clamp(-1.0, 1.0);
+        sum_sq += gained * gained;
+        let _ = producer.try_push(gained);
     }
 
-    // Push samples into ring buffer; drop oldest if full
-    for &sample in data {
-        let _ = producer.try_push(sample);
+    if !data.is_empty() {
+        let rms = (sum_sq / data.len() as f32).sqrt();
+        rms_level.store(rms.to_bits(), Ordering::Relaxed);
     }
 }
