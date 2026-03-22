@@ -14,7 +14,7 @@
   max-width: $content-max-width;
   width: 100%;
   margin: 0 auto;
-  padding: $space-16 $space-24;
+  padding: $space-12 $space-24;
   border-bottom: $border-1 solid $color-border;
 }
 
@@ -28,6 +28,78 @@
 
 .navBrand:hover {
   color: $color-accent;
+}
+
+.navRight {
+  display: flex;
+  align-items: center;
+  gap: $space-16;
+}
+
+.recordingStatus {
+  display: flex;
+  align-items: center;
+  gap: $space-8;
+}
+
+.recordingDot {
+  width: $dot-size;
+  height: $dot-size;
+  border-radius: $radius-round;
+  background-color: $color-recording;
+  display: inline-block;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(0.85);
+  }
+}
+
+.timer {
+  font-size: $font-base;
+  font-weight: $weight-semibold;
+  font-variant-numeric: tabular-nums;
+  color: $color-text-heading;
+  letter-spacing: 0.04em;
+}
+
+.navRecordBtn {
+  padding: $space-6 $space-16;
+  font-size: $font-sm;
+  font-weight: $weight-semibold;
+  font-family: inherit;
+  color: $color-text-inverse;
+  background-color: $color-accent;
+  border: none;
+  border-radius: $radius-8;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.navRecordBtn:hover {
+  background-color: $color-accent-hover;
+}
+
+.navRecordBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.navRecordBtnActive {
+  background-color: $color-recording;
+  color: $color-text-white;
+}
+
+.navRecordBtnActive:hover {
+  background-color: $color-recording-hover;
 }
 
 .navLink {
@@ -52,5 +124,5 @@
   display: flex;
   flex-direction: column;
   gap: $space-20;
-  overflow: hidden;
+  overflow-y: auto;
 }

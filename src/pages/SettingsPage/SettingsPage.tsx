@@ -5,6 +5,7 @@ import {
   deleteModel,
   setModelsDir,
 } from "../../lib/commands";
+import { useRecording } from "../../hooks/useRecording";
 import type { ModelInfo } from "../../types";
 import s from "./SettingsPage.module.scss";
 
@@ -20,8 +21,19 @@ function formatFileSize(bytes: number): string {
   return `${value.toFixed(1)} ${units[i]}`;
 }
 
-/** Settings page for managing the Whisper transcription model and storage location. */
+/** Settings page for managing audio sources, transcription model, and storage location. */
 export function SettingsPage() {
+  const {
+    isRecording,
+    micDevices,
+    systemDevices,
+    micDeviceId,
+    systemDeviceId,
+    setMicDeviceId,
+    setSystemDeviceId,
+    refreshModelStatus,
+  } = useRecording();
+
   const [modelInfo, setModelInfo] = useState<ModelInfo | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [customPath, setCustomPath] = useState("");
@@ -48,22 +60,24 @@ export function SettingsPage() {
     try {
       await downloadModel();
       await loadModelInfo();
+      await refreshModelStatus();
     } catch (err) {
       console.error("Failed to download model:", err);
     } finally {
       setIsDownloading(false);
     }
-  }, [loadModelInfo]);
+  }, [loadModelInfo, refreshModelStatus]);
 
   /** Delete the Whisper transcription model file. */
   const handleDelete = useCallback(async () => {
     try {
       await deleteModel();
       await loadModelInfo();
+      await refreshModelStatus();
     } catch (err) {
       console.error("Failed to delete model:", err);
     }
-  }, [loadModelInfo]);
+  }, [loadModelInfo, refreshModelStatus]);
 
   /** Save a custom models directory path. */
   const handleSavePath = useCallback(async () => {
@@ -93,7 +107,7 @@ export function SettingsPage() {
         <header className={s.header}>
           <h1>Settings</h1>
         </header>
-        <div className={s.loading}>Loading model information...</div>
+        <div className={s.loading}>Loading settings...</div>
       </>
     );
   }
@@ -104,6 +118,50 @@ export function SettingsPage() {
       <header className={s.header}>
         <h1>Settings</h1>
       </header>
+
+      {/* Audio Sources */}
+      <section className={s.panel}>
+        <h2>Audio Sources</h2>
+        {isRecording && (
+          <p className={s.disabledNote}>
+            Audio sources cannot be changed while recording.
+          </p>
+        )}
+        <div className={s.deviceSelectors}>
+          <label className={s.deviceLabel}>
+            <span>Microphone</span>
+            <select
+              value={micDeviceId}
+              onChange={(e) => setMicDeviceId(e.target.value)}
+              disabled={isRecording}
+              className={isRecording ? s.selectDisabled : undefined}
+            >
+              {micDevices.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                  {d.is_default ? " (Default)" : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className={s.deviceLabel}>
+            <span>System Audio</span>
+            <select
+              value={systemDeviceId}
+              onChange={(e) => setSystemDeviceId(e.target.value)}
+              disabled={isRecording}
+              className={isRecording ? s.selectDisabled : undefined}
+            >
+              {systemDevices.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                  {d.is_default ? " (Default)" : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </section>
 
       {/* Model Management */}
       <section className={s.panel}>

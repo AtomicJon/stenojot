@@ -1,59 +1,5 @@
 @use "../../styles" as *;
 
-// ── Header ──────────────────────────────────────
-.header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding-bottom: $space-16;
-  border-bottom: $border-1 solid $color-border;
-}
-
-.headerTitle {
-  display: flex;
-  align-items: center;
-  gap: $space-12;
-}
-
-.header h1 {
-  font-size: $font-2xl;
-  font-weight: $weight-semibold;
-  color: $color-text-heading;
-  letter-spacing: -0.02em;
-}
-
-.recordingDot {
-  width: $dot-size;
-  height: $dot-size;
-  border-radius: $radius-round;
-  background-color: $color-recording;
-  display: inline-block;
-  animation: pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes pulse {
-  0%,
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.5;
-    transform: scale(0.85);
-  }
-}
-
-.recordingBadge {
-  font-size: $font-sm;
-  font-weight: $weight-semibold;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: $color-recording;
-  background-color: $color-recording-bg;
-  padding: $space-4 $space-12;
-  border-radius: $radius-12;
-}
-
 // ── Panels ──────────────────────────────────────
 .panel {
   background-color: $color-surface;
@@ -71,7 +17,7 @@
   margin-bottom: $space-16;
 }
 
-// ── Device selection ────────────────────────────
+// ── Audio tuning sliders ────────────────────────
 .deviceSelectors {
   display: flex;
   flex-direction: column;
@@ -89,40 +35,6 @@
   color: $color-text-secondary;
 }
 
-.deviceLabel select {
-  width: 100%;
-  padding: $space-10 $space-14;
-  font-size: $font-md;
-  font-family: inherit;
-  color: $color-text;
-  background-color: $color-bg;
-  border: $border-1 solid $color-border;
-  border-radius: $radius-8;
-  outline: none;
-  cursor: pointer;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%238888aa' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right $space-12 center;
-  padding-right: $space-32;
-  transition: border-color 0.2s;
-}
-
-.deviceLabel select:hover {
-  border-color: $color-accent;
-}
-
-.deviceLabel select:focus {
-  border-color: $color-accent;
-  box-shadow: 0 0 0 2px rgba(78, 205, 196, 0.15);
-}
-
-.deviceLabel select option {
-  background-color: $color-bg;
-  color: $color-text;
-}
-
-// ── Gain slider ────────────────────────────────
 .gainSlider {
   width: 100%;
   height: $level-bar-height;
@@ -155,56 +67,6 @@
     background: $color-bg;
     border-radius: $radius-5;
   }
-}
-
-// ── Controls ────────────────────────────────────
-.controlsPanel {
-  display: flex;
-  align-items: center;
-  gap: $space-20;
-}
-
-.recordBtn {
-  flex-shrink: 0;
-  padding: $space-14 $space-32;
-  font-size: $font-lg;
-  font-weight: $weight-semibold;
-  font-family: inherit;
-  color: $color-text-inverse;
-  background-color: $color-accent;
-  border: none;
-  border-radius: $radius-10;
-  cursor: pointer;
-  transition: background-color 0.2s, transform 0.1s, box-shadow 0.2s;
-  box-shadow: 0 2px 8px rgba(78, 205, 196, 0.25);
-}
-
-.recordBtn:hover {
-  background-color: $color-accent-hover;
-  box-shadow: 0 4px 16px rgba(78, 205, 196, 0.35);
-}
-
-.recordBtn:active {
-  transform: scale(0.97);
-}
-
-.recordBtn.recording {
-  background-color: $color-recording;
-  color: #ffffff;
-  box-shadow: 0 2px 8px rgba(231, 76, 60, 0.3);
-}
-
-.recordBtn.recording:hover {
-  background-color: $color-recording-hover;
-  box-shadow: 0 4px 16px rgba(231, 76, 60, 0.4);
-}
-
-.timer {
-  font-size: $font-3xl;
-  font-weight: $weight-semibold;
-  font-variant-numeric: tabular-nums;
-  color: $color-text-heading;
-  letter-spacing: 0.04em;
 }
 
 // ── Audio Level Meters ──────────────────────────
