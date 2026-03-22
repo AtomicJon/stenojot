@@ -1,0 +1,46 @@
+@use "../../styles" as *;
+
+.wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: $space-6;
+}
+
+.label {
+  font-size: $font-base;
+  color: $color-text-secondary;
+}
+
+.slider {
+  width: 100%;
+  height: $level-bar-height;
+  appearance: none;
+  background: $color-bg;
+  border-radius: $radius-5;
+  outline: none;
+  cursor: pointer;
+
+  &::-webkit-slider-thumb {
+    appearance: none;
+    width: $space-16;
+    height: $space-16;
+    border-radius: $radius-round;
+    background: $color-accent;
+    cursor: pointer;
+  }
+
+  &::-moz-range-thumb {
+    width: $space-16;
+    height: $space-16;
+    border-radius: $radius-round;
+    background: $color-accent;
+    border: none;
+    cursor: pointer;
+  }
+
+  &::-moz-range-track {
+    height: $level-bar-height;
+    background: $color-bg;
+    border-radius: $radius-5;
+  }
+}

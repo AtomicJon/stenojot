@@ -1,0 +1,48 @@
+@use "../../styles" as *;
+
+.button {
+  padding: $space-10 $space-20;
+  font-size: $font-base;
+  font-weight: $weight-semibold;
+  font-family: inherit;
+  border: none;
+  border-radius: $radius-8;
+  cursor: pointer;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+// ── Variants ─────────────────────────────────
+.accent {
+  color: $color-text-inverse;
+  background-color: $color-accent;
+}
+
+.accent:hover:not(:disabled) {
+  background-color: $color-accent-hover;
+}
+
+.danger {
+  color: $color-text-white;
+  background-color: $color-error;
+}
+
+.danger:hover:not(:disabled) {
+  background-color: $color-error-hover;
+}
+
+.link {
+  padding: 0;
+  font-size: $font-sm;
+  color: $color-text-muted;
+  background: none;
+  border-radius: 0;
+}
+
+.link:hover:not(:disabled) {
+  color: $color-accent;
+}

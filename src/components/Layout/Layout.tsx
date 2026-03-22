@@ -1,16 +1,7 @@
 import { Link, Outlet } from "react-router-dom";
 import { useRecording } from "../../hooks/useRecording";
+import { formatTime } from "../../lib/format";
 import s from "./Layout.module.scss";
-
-/**
- * Format seconds to MM:SS display string.
- * @param totalSeconds - Elapsed time in seconds
- */
-function formatTime(totalSeconds: number): string {
-  const mins = Math.floor(totalSeconds / 60);
-  const secs = totalSeconds % 60;
-  return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
-}
 
 /** App shell with top navigation, global recording controls, and consistent layout wrapping all routes. */
 export function Layout() {

@@ -1,0 +1,17 @@
+@use "../../styles" as *;
+
+.panel {
+  background-color: $color-surface;
+  border-radius: $radius-12;
+  padding: $space-20;
+  border: $border-1 solid $color-border;
+}
+
+.title {
+  font-size: $font-sm;
+  font-weight: $weight-semibold;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: $color-text-muted;
+  margin-bottom: $space-16;
+}

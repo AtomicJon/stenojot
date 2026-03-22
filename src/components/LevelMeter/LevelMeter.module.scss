@@ -1,0 +1,62 @@
+@use "../../styles" as *;
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: $space-12;
+}
+
+.label {
+  font-size: $font-sm;
+  color: $color-text-secondary;
+  width: $level-label-width;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.track {
+  flex: 1;
+  height: $level-bar-height;
+  background-color: $color-bg;
+  border-radius: $radius-5;
+  overflow: hidden;
+  position: relative;
+}
+
+.fill {
+  height: 100%;
+  border-radius: $radius-5;
+  transition: width 0.08s linear, background-color 0.15s ease;
+  min-width: 0;
+}
+
+.low {
+  background-color: $color-success;
+}
+
+.mid {
+  background-color: $color-warning;
+}
+
+.high {
+  background-color: $color-error;
+}
+
+.threshold {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: $border-1;
+  background-color: $color-warning;
+  opacity: 0.8;
+  pointer-events: none;
+}
+
+.value {
+  font-size: $font-xs;
+  font-variant-numeric: tabular-nums;
+  color: $color-text-muted;
+  width: $level-value-width;
+  text-align: right;
+  flex-shrink: 0;
+}

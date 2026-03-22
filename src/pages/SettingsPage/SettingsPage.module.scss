@@ -21,77 +21,11 @@
   padding: $space-20;
 }
 
-// ── Panels ──────────────────────────────────────
-.panel {
-  background-color: $color-surface;
-  border-radius: $radius-12;
-  padding: $space-20;
-  border: $border-1 solid $color-border;
-}
-
-.panel h2 {
-  font-size: $font-sm;
-  font-weight: $weight-semibold;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: $color-text-muted;
-  margin-bottom: $space-16;
-}
-
-// ── Audio Sources ──────────────────────────────
-.deviceSelectors {
+// ── Field groups ────────────────────────────────
+.fieldGroup {
   display: flex;
   flex-direction: column;
   gap: $space-14;
-}
-
-.deviceLabel {
-  display: flex;
-  flex-direction: column;
-  gap: $space-6;
-}
-
-.deviceLabel span {
-  font-size: $font-base;
-  color: $color-text-secondary;
-}
-
-.deviceLabel select {
-  width: 100%;
-  padding: $space-10 $space-14;
-  font-size: $font-md;
-  font-family: inherit;
-  color: $color-text;
-  background-color: $color-bg;
-  border: $border-1 solid $color-border;
-  border-radius: $radius-8;
-  outline: none;
-  cursor: pointer;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%238888aa' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right $space-12 center;
-  padding-right: $space-32;
-  transition: border-color 0.2s, opacity 0.2s;
-}
-
-.deviceLabel select:hover:not(:disabled) {
-  border-color: $color-accent;
-}
-
-.deviceLabel select:focus {
-  border-color: $color-accent;
-  box-shadow: 0 0 0 2px rgba(78, 205, 196, 0.15);
-}
-
-.deviceLabel select option {
-  background-color: $color-bg;
-  color: $color-text;
-}
-
-.selectDisabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .disabledNote {
@@ -147,45 +81,6 @@
   gap: $space-12;
 }
 
-.downloadBtn {
-  padding: $space-10 $space-20;
-  font-size: $font-base;
-  font-weight: $weight-semibold;
-  font-family: inherit;
-  color: $color-text-inverse;
-  background-color: $color-accent;
-  border: none;
-  border-radius: $radius-8;
-  cursor: pointer;
-  transition: background-color 0.2s;
-}
-
-.downloadBtn:hover {
-  background-color: $color-accent-hover;
-}
-
-.downloadBtn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.deleteBtn {
-  padding: $space-10 $space-20;
-  font-size: $font-base;
-  font-weight: $weight-semibold;
-  font-family: inherit;
-  color: $color-text-white;
-  background-color: $color-error;
-  border: none;
-  border-radius: $radius-8;
-  cursor: pointer;
-  transition: background-color 0.2s;
-}
-
-.deleteBtn:hover {
-  background-color: $color-error-hover;
-}
-
 // ── Storage Location ────────────────────────────
 .sectionDesc {
   font-size: $font-base;
@@ -218,38 +113,4 @@
 
 .pathInput::placeholder {
   color: $color-text-muted;
-}
-
-.saveBtn {
-  padding: $space-10 $space-20;
-  font-size: $font-base;
-  font-weight: $weight-semibold;
-  font-family: inherit;
-  color: $color-text-inverse;
-  background-color: $color-accent;
-  border: none;
-  border-radius: $radius-8;
-  cursor: pointer;
-  transition: background-color 0.2s;
-  flex-shrink: 0;
-}
-
-.saveBtn:hover {
-  background-color: $color-accent-hover;
-}
-
-.resetLink {
-  font-size: $font-sm;
-  font-weight: $weight-semibold;
-  color: $color-text-muted;
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 0;
-  transition: color 0.2s;
-  font-family: inherit;
-}
-
-.resetLink:hover {
-  color: $color-accent;
 }
