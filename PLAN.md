@@ -291,8 +291,9 @@ ringbuf = "0.4"            # Lock-free SPSC ring buffers
 rubato = "0.15"            # Sample rate conversion (→ 16kHz for Whisper)
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros"] }
 
-# Transcription (Phase 2 — not yet installed)
-# whisper-rs = "0.16"      # Local Whisper transcription
+# Transcription (Phase 2 — installed)
+whisper-rs = "0.16"        # Local Whisper transcription (requires clang for build)
+reqwest = "0.12"           # Model download from Hugging Face (blocking + stream features)
 
 # Platform-specific system audio (Phase 5 — not yet installed)
 # pipewire = "0.9"         # Automatic monitor source detection (Linux)
@@ -326,17 +327,23 @@ tauri-plugin-opener = "2"
 - Ring buffers drain on each `get_audio_levels` poll to prevent overflow until Phase 2 wires up the transcription consumer.
 - `cpal::Stream` is `!Send`; `AppState` uses `unsafe impl Send + Sync` with all access gated behind a `Mutex`.
 
-### Phase 2: Transcription Pipeline
+### Phase 2: Transcription Pipeline ✅
 **Complexity: Medium-High | Focus: Whisper integration**
 
-- [ ] **2.1** Integrate whisper-rs, handle model download/management
-- [ ] **2.2** Build segment accumulator (VAD-bounded chunks → Whisper)
-- [ ] **2.3** Implement dual-stream transcription (mic and system audio independently)
-- [ ] **2.4** Stream transcript segments to frontend via Tauri Channel
-- [ ] **2.5** Frontend: live transcript display with speaker labels ("Me" / "Others")
-- [ ] **2.6** Handle Whisper model selection (base/small) in settings
+- [x] **2.1** Integrate whisper-rs 0.16, model download from Hugging Face (`check_model_status`, `download_model` commands)
+- [x] **2.2** Build segment accumulator (VAD-bounded chunks → Whisper, ~5s segments or silence-after-speech)
+- [x] **2.3** Dual-stream transcription — mic and system audio processed independently on a dedicated worker thread
+- [x] **2.4** Stream transcript segments to frontend via Tauri `Channel<TranscriptSegment>`
+- [x] **2.5** Frontend: live transcript display with speaker labels, auto-scroll, timestamp formatting
+- [ ] **2.6** Handle Whisper model selection (base/small) in settings — deferred to later; hardcoded to `base` model
 
-**Key risk:** Whisper processing speed on CPU. If too slow for real-time, options: (a) use `base` model, (b) increase segment length, (c) add GPU support.
+**Implementation notes:**
+- Used whisper-rs 0.16 (not 0.14 — 0.14 had bindgen size assertion failures with newer clang). Requires `clang` installed for building.
+- `TranscriptionWorker` runs on a dedicated `std::thread` (not tokio) to avoid blocking the async runtime during CPU-intensive Whisper inference.
+- Worker reads from ring buffer consumers, resamples via `pipeline::process_buffer()`, accumulates ~5s segments (80k samples at 16kHz), then runs Whisper `full()` on each segment independently for mic/system.
+- `AudioPipeline` struct removed — worker takes direct ownership of ring buffer consumers. `process_buffer()` and `is_speech()` remain as standalone functions.
+- Model management: models stored in `~/.local/share/echonotes/models/`, downloaded via `reqwest::blocking` from Hugging Face.
+- Frontend uses Tauri `Channel` API — `startRecording` creates a channel and passes an `onTranscript` callback. Model download UI shown when model is not yet available.
 
 ### Phase 3: Markdown Output & Persistence
 **Complexity: Medium | Focus: Producing useful output files**

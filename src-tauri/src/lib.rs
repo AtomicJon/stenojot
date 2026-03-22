@@ -1,5 +1,6 @@
 mod audio;
 mod commands;
+mod transcription;
 
 use commands::AppState;
 use std::sync::Mutex;
@@ -14,6 +15,10 @@ pub fn run() {
             commands::start_recording,
             commands::stop_recording,
             commands::get_audio_levels,
+            commands::get_model_info,
+            commands::delete_model,
+            commands::set_models_dir,
+            commands::download_model,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

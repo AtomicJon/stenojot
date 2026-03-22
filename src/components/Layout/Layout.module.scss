@@ -1,10 +1,52 @@
 @use "../../styles" as *;
 
+.shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  max-width: $content-max-width;
+  width: 100%;
+  margin: 0 auto;
+  padding: $space-16 $space-24;
+  border-bottom: $border-1 solid $color-border;
+}
+
+.navBrand {
+  font-size: $font-xl;
+  font-weight: $weight-bold;
+  color: $color-text-heading;
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.navBrand:hover {
+  color: $color-accent;
+}
+
+.navLink {
+  font-size: $font-base;
+  font-weight: $weight-semibold;
+  color: $color-text-secondary;
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.navLink:hover {
+  color: $color-accent;
+}
+
 .layout {
   max-width: $content-max-width;
+  width: 100%;
   margin: 0 auto;
   padding: $space-24;
-  min-height: 100vh;
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: $space-20;

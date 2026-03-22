@@ -1,0 +1,192 @@
+@use "../../styles" as *;
+
+// ── Header ──────────────────────────────────────
+.header {
+  padding-bottom: $space-16;
+  border-bottom: $border-1 solid $color-border;
+}
+
+.header h1 {
+  font-size: $font-2xl;
+  font-weight: $weight-semibold;
+  color: $color-text-heading;
+  letter-spacing: -0.02em;
+}
+
+// ── Loading state ───────────────────────────────
+.loading {
+  font-size: $font-base;
+  color: $color-text-muted;
+  font-style: italic;
+  padding: $space-20;
+}
+
+// ── Panels ──────────────────────────────────────
+.panel {
+  background-color: $color-surface;
+  border-radius: $radius-12;
+  padding: $space-20;
+  border: $border-1 solid $color-border;
+}
+
+.panel h2 {
+  font-size: $font-sm;
+  font-weight: $weight-semibold;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: $color-text-muted;
+  margin-bottom: $space-16;
+}
+
+// ── Info grid ───────────────────────────────────
+.infoGrid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: $space-8 $space-16;
+  margin-bottom: $space-20;
+}
+
+.infoLabel {
+  font-size: $font-sm;
+  font-weight: $weight-semibold;
+  color: $color-text-secondary;
+}
+
+.infoValue {
+  font-size: $font-base;
+  color: $color-text;
+}
+
+.infoValueMono {
+  font-family: $font-mono;
+  font-size: $font-xs;
+  color: $color-text;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// ── Status badges ───────────────────────────────
+.statusDownloaded {
+  font-size: $font-base;
+  font-weight: $weight-semibold;
+  color: $color-success;
+}
+
+.statusMissing {
+  font-size: $font-base;
+  color: $color-text-muted;
+}
+
+// ── Actions ─────────────────────────────────────
+.actions {
+  display: flex;
+  gap: $space-12;
+}
+
+.downloadBtn {
+  padding: $space-10 $space-20;
+  font-size: $font-base;
+  font-weight: $weight-semibold;
+  font-family: inherit;
+  color: $color-text-inverse;
+  background-color: $color-accent;
+  border: none;
+  border-radius: $radius-8;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.downloadBtn:hover {
+  background-color: $color-accent-hover;
+}
+
+.downloadBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.deleteBtn {
+  padding: $space-10 $space-20;
+  font-size: $font-base;
+  font-weight: $weight-semibold;
+  font-family: inherit;
+  color: $color-text-white;
+  background-color: $color-error;
+  border: none;
+  border-radius: $radius-8;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.deleteBtn:hover {
+  background-color: $color-error-hover;
+}
+
+// ── Storage Location ────────────────────────────
+.sectionDesc {
+  font-size: $font-base;
+  color: $color-text-secondary;
+  margin-bottom: $space-12;
+}
+
+.pathInputRow {
+  display: flex;
+  gap: $space-8;
+  margin-bottom: $space-8;
+}
+
+.pathInput {
+  flex: 1;
+  padding: $space-10 $space-14;
+  font-size: $font-base;
+  font-family: $font-mono;
+  color: $color-text;
+  background-color: $color-bg;
+  border: $border-1 solid $color-border;
+  border-radius: $radius-8;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.pathInput:focus {
+  border-color: $color-accent;
+}
+
+.pathInput::placeholder {
+  color: $color-text-muted;
+}
+
+.saveBtn {
+  padding: $space-10 $space-20;
+  font-size: $font-base;
+  font-weight: $weight-semibold;
+  font-family: inherit;
+  color: $color-text-inverse;
+  background-color: $color-accent;
+  border: none;
+  border-radius: $radius-8;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  flex-shrink: 0;
+}
+
+.saveBtn:hover {
+  background-color: $color-accent-hover;
+}
+
+.resetLink {
+  font-size: $font-sm;
+  font-weight: $weight-semibold;
+  color: $color-text-muted;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.2s;
+  font-family: inherit;
+}
+
+.resetLink:hover {
+  color: $color-accent;
+}

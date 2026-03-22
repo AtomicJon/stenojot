@@ -1,14 +1,27 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { Link } from "react-router-dom";
 import {
   getAudioDevices,
   startRecording,
   stopRecording,
   getAudioLevels,
+  getModelInfo,
 } from "../../lib/commands";
-import type { AudioDevice, AudioLevels } from "../../types";
+import type { AudioDevice, AudioLevels, TranscriptSegment } from "../../types";
 import s from "./RecordingPage.module.scss";
 
-/** Main recording page with device selection, controls, and audio meters. */
+/**
+ * Format milliseconds to MM:SS display string.
+ * @param ms - Time in milliseconds
+ */
+function formatTimestamp(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const mins = Math.floor(totalSeconds / 60);
+  const secs = totalSeconds % 60;
+  return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+}
+
+/** Main recording page with device selection, controls, audio meters, and live transcript. */
 export function RecordingPage() {
   const [devices, setDevices] = useState<AudioDevice[]>([]);
   const [micDeviceId, setMicDeviceId] = useState("");
@@ -19,12 +32,21 @@ export function RecordingPage() {
     mic_rms: 0,
     system_rms: 0,
   });
+  const [segments, setSegments] = useState<TranscriptSegment[]>([]);
+  const [modelReady, setModelReady] = useState(false);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const levelPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const transcriptEndRef = useRef<HTMLDivElement | null>(null);
 
+  // Auto-scroll transcript to bottom when new segments arrive
   useEffect(() => {
-    async function fetchDevices() {
+    transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [segments]);
+
+  // Fetch audio devices and check model status on mount
+  useEffect(() => {
+    async function init() {
       try {
         const devs = await getAudioDevices();
         setDevices(devs);
@@ -39,10 +61,18 @@ export function RecordingPage() {
       } catch (err) {
         console.error("Failed to get audio devices:", err);
       }
+
+      try {
+        const info = await getModelInfo();
+        setModelReady(info.downloaded);
+      } catch (err) {
+        console.error("Failed to check model status:", err);
+      }
     }
-    fetchDevices();
+    init();
   }, []);
 
+  // Cleanup intervals on unmount
   useEffect(() => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
@@ -50,9 +80,13 @@ export function RecordingPage() {
     };
   }, []);
 
+  /** Start recording and streaming transcript segments. */
   const handleStart = useCallback(async () => {
     try {
-      await startRecording(micDeviceId, systemDeviceId);
+      setSegments([]);
+      await startRecording(micDeviceId, systemDeviceId, (segment) => {
+        setSegments((prev) => [...prev, segment]);
+      });
       setIsRecording(true);
       setElapsedSeconds(0);
 
@@ -73,6 +107,7 @@ export function RecordingPage() {
     }
   }, [micDeviceId, systemDeviceId]);
 
+  /** Stop the current recording session. */
   const handleStop = useCallback(async () => {
     try {
       await stopRecording();
@@ -114,12 +149,24 @@ export function RecordingPage() {
       <header className={s.header}>
         <div className={s.headerTitle}>
           {isRecording && <span className={s.recordingDot} />}
-          <h1>EchoNotes</h1>
+          <h1>Recording</h1>
         </div>
         {isRecording && (
           <span className={s.recordingBadge}>Recording</span>
         )}
       </header>
+
+      {/* Model not downloaded notice */}
+      {!modelReady && (
+        <div className={s.modelNotice}>
+          <span className={s.modelNoticeText}>
+            Transcription model not downloaded.
+          </span>
+          <Link to="/settings" className={s.modelNoticeLink}>
+            Go to Settings to download
+          </Link>
+        </div>
+      )}
 
       {/* Device Selection */}
       {!isRecording && (
@@ -163,6 +210,7 @@ export function RecordingPage() {
         <button
           className={`${s.recordBtn} ${isRecording ? s.recording : ""}`}
           onClick={isRecording ? handleStop : handleStart}
+          disabled={!modelReady && !isRecording}
         >
           {isRecording ? "Stop Recording" : "Start Recording"}
         </button>
@@ -205,9 +253,31 @@ export function RecordingPage() {
       {/* Transcript Panel */}
       <section className={`${s.panel} ${s.transcriptPanel}`}>
         <h2>Transcript</h2>
-        <div className={s.transcriptPlaceholder}>
-          Transcript will appear here during recording...
-        </div>
+        {segments.length === 0 ? (
+          <div className={s.transcriptPlaceholder}>
+            {isRecording
+              ? "Listening for speech..."
+              : "Transcript will appear here during recording..."}
+          </div>
+        ) : (
+          <div className={s.transcriptList}>
+            {segments.map((seg, i) => (
+              <div
+                key={`${seg.start_ms}-${i}`}
+                className={`${s.segment} ${seg.speaker === "Me" ? s.segmentMe : s.segmentOthers}`}
+              >
+                <div className={s.segmentHeader}>
+                  <span className={s.segmentTimestamp}>
+                    {formatTimestamp(seg.start_ms)}
+                  </span>
+                  <span className={s.segmentSpeaker}>{seg.speaker}</span>
+                </div>
+                <div className={s.segmentText}>{seg.text}</div>
+              </div>
+            ))}
+            <div ref={transcriptEndRef} />
+          </div>
+        )}
       </section>
     </>
   );

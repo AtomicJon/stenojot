@@ -11,6 +11,15 @@ export interface AudioLevels {
   system_rms: number;
 }
 
+/** Detailed information about the Whisper transcription model. */
+export interface ModelInfo {
+  name: string;
+  path: string;
+  downloaded: boolean;
+  size_bytes: number;
+  models_dir: string;
+}
+
 /** A single segment of transcribed speech. */
 export interface TranscriptSegment {
   text: string;

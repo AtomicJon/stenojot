@@ -13,6 +13,7 @@ $space-48:  48px;
 
 // ── Border widths ───────────────────────────────
 $border-1:  1px;
+$border-3:  3px;
 
 // ── Border radii (suffix = px value) ────────────
 $radius-5:     5px;
@@ -22,6 +23,10 @@ $radius-12:    12px;
 $radius-round: 50%;
 
 // ── Layout constraints ──────────────────────────
-$content-max-width: 800px;
-$dot-size:          12px;
-$level-bar-height:  10px;
+$content-max-width:     800px;
+$dot-size:              12px;
+$level-bar-height:      10px;
+$transcript-min-height: 200px;
+$transcript-max-height: 400px;
+$level-label-width:     52px;
+$level-value-width:     36px;

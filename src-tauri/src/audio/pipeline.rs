@@ -1,54 +1,19 @@
-use ringbuf::traits::Consumer as _;
-use ringbuf::HeapCons;
-use rubato::{Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction};
+//! Audio processing utilities for resampling and voice activity detection.
+//!
+//! Provides standalone functions used by the transcription worker to
+//! convert captured audio to 16 kHz mono and detect speech segments.
+
+use rubato::{
+    Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
+};
 
 const TARGET_SAMPLE_RATE: u32 = 16_000;
 const CHUNK_SIZE: usize = 1024;
 const VAD_THRESHOLD: f32 = 0.01;
 
-/// Resamples audio to 16kHz mono and applies simple energy-based VAD.
-pub struct AudioPipeline {
-    mic_consumer: Option<HeapCons<f32>>,
-    system_consumer: Option<HeapCons<f32>>,
-}
-
-impl AudioPipeline {
-    pub fn new() -> Self {
-        Self {
-            mic_consumer: None,
-            system_consumer: None,
-        }
-    }
-
-    pub fn set_mic_consumer(&mut self, consumer: HeapCons<f32>) {
-        self.mic_consumer = Some(consumer);
-    }
-
-    pub fn set_system_consumer(&mut self, consumer: HeapCons<f32>) {
-        self.system_consumer = Some(consumer);
-    }
-
-    /// Drain both ring buffers to prevent overflow.
-    /// In Phase 2 this will feed into transcription; for now just discard.
-    pub fn drain_buffers(&mut self) {
-        if let Some(ref mut consumer) = self.mic_consumer {
-            while consumer.try_pop().is_some() {}
-        }
-        if let Some(ref mut consumer) = self.system_consumer {
-            while consumer.try_pop().is_some() {}
-        }
-    }
-
-    /// Remove consumers when recording stops.
-    pub fn clear_consumers(&mut self) {
-        self.mic_consumer = None;
-        self.system_consumer = None;
-    }
-}
-
-/// Resample audio from the source sample rate and channel count to 16kHz mono.
+/// Resample audio from the source sample rate and channel count to 16 kHz mono.
 ///
-/// Returns the resampled mono audio at 16kHz.
+/// Returns the resampled mono audio at 16 kHz.
 pub fn process_buffer(input: &[f32], from_sample_rate: u32, from_channels: u16) -> Vec<f32> {
     if input.is_empty() {
         return Vec::new();
