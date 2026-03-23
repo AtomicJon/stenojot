@@ -381,9 +381,6 @@ tempfile = "3"             # Isolated temp directories for file system tests
 
 - [x] **4.1** Post-meeting LLM call: generate `summary.md` from transcript (key points + action items, ignore small talk)
 - [x] **4.2** LLM integration (local via Ollama, or cloud via OpenAI/Anthropic API)
-- [ ] **4.3** Rich text notepad editor for user notes during meetings (TipTap)
-- [ ] **4.4** Save user notes as `notes.md` alongside transcript and summary
-- [ ] **4.5** Note template system (shapes the AI summary structure)
 - [x] **4.6** Meeting name detection from window titles / LLM-generated titles
 
 **Implementation notes:**
@@ -403,9 +400,15 @@ tempfile = "3"             # Isolated temp directories for file system tests
 
 - [ ] **5.1** Windows system audio capture (WASAPI loopback)
 - [ ] **5.2** macOS system audio capture (ScreenCaptureKit)
-- [ ] **5.3** Cloud transcription backend (Deepgram) as alternative
-- [ ] **5.4** Calendar integration
-- [ ] **5.5** Multi-speaker diarization (native-pyannote-rs)
+
+### FUTURE
+- [ ] Rich text notepad editor for user notes during meetings (TipTap)
+- [ ] Save user notes as `notes.md` alongside transcript and summary
+- [ ] Note template system (shapes the AI summary structure)
+- [ ] Cloud transcription backend (Deepgram) as alternative
+- [ ] Calendar integration
+- [ ] Multi-speaker diarization (native-pyannote-rs)
+
 
 ---
 
