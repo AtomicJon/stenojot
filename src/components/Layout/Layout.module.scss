@@ -102,6 +102,49 @@
   background-color: $color-recording-hover;
 }
 
+.navPauseBtn {
+  padding: $space-6 $space-16;
+  font-size: $font-sm;
+  font-weight: $weight-semibold;
+  font-family: inherit;
+  color: $color-text-heading;
+  background-color: transparent;
+  border: $border-1 solid $color-border;
+  border-radius: $radius-8;
+  cursor: pointer;
+  transition: background-color 0.2s, border-color 0.2s;
+}
+
+.navPauseBtn:hover {
+  background-color: $color-hover;
+  border-color: $color-text-secondary;
+}
+
+.recordingDotPaused {
+  width: $dot-size;
+  height: $dot-size;
+  border-radius: $radius-round;
+  background-color: $color-warning;
+  display: inline-block;
+}
+
+.pausedLabel {
+  font-size: $font-xs;
+  color: $color-warning;
+}
+
+.navSessionLink {
+  font-size: $font-sm;
+  font-weight: $weight-semibold;
+  color: $color-recording;
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.navSessionLink:hover {
+  color: $color-recording-hover;
+}
+
 .navLink {
   font-size: $font-base;
   font-weight: $weight-semibold;

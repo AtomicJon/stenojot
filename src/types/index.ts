@@ -9,6 +9,10 @@ export interface AudioDevice {
 export interface AudioLevels {
   mic_rms: number;
   system_rms: number;
+  /** True if the recording is currently paused. */
+  is_paused: boolean;
+  /** True if the worker auto-stopped due to silence timeout. */
+  auto_stopped: boolean;
 }
 
 /** Detailed information about the Whisper transcription model. */
@@ -27,6 +31,32 @@ export interface PersistedSettings {
   mic_gain: number;
   vad_threshold: number;
   models_dir: string | null;
+  output_dir: string | null;
+  silence_timeout_seconds: number | null;
+}
+
+/** Result returned by `start_recording`. */
+export interface StartRecordingResult {
+  transcript_path: string;
+  meeting_name: string;
+}
+
+/** Result returned by `stop_recording`. */
+export interface StopRecordingResult {
+  transcript_path: string | null;
+  segment_count: number;
+}
+
+/** A meeting entry parsed from the transcript output directory. */
+export interface MeetingEntry {
+  name: string;
+  date: string;
+  time: string;
+  has_transcript: boolean;
+  has_summary: boolean;
+  transcript_path: string;
+  summary_path: string;
+  size_bytes: number;
 }
 
 /** A single segment of transcribed speech. */

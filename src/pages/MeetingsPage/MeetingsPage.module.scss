@@ -1,0 +1,95 @@
+@use "../../styles" as *;
+
+// ── Header ──────────────────────────────────────
+.header {
+  padding-bottom: $space-16;
+  border-bottom: $border-1 solid $color-border;
+}
+
+.header h1 {
+  font-size: $font-2xl;
+  font-weight: $weight-semibold;
+  color: $color-text-heading;
+  letter-spacing: -0.02em;
+}
+
+// ── Empty / loading state ───────────────────────
+.emptyState {
+  font-size: $font-base;
+  color: $color-text-muted;
+  font-style: italic;
+  padding: $space-20;
+}
+
+// ── Meeting list ────────────────────────────────
+.meetingList {
+  display: flex;
+  flex-direction: column;
+  gap: $space-8;
+}
+
+// ── Meeting card ────────────────────────────────
+.meetingCard {
+  display: flex;
+  flex-direction: column;
+  gap: $space-6;
+  padding: $space-16;
+  background-color: $color-surface;
+  border: $border-1 solid $color-border;
+  border-radius: $radius-12;
+  cursor: pointer;
+  transition: background-color 0.2s, border-color 0.2s;
+  text-align: left;
+  font-family: inherit;
+  width: 100%;
+}
+
+.meetingCard:hover {
+  background-color: $color-hover;
+  border-color: $color-accent;
+}
+
+.cardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.cardName {
+  font-size: $font-base;
+  font-weight: $weight-semibold;
+  color: $color-text-heading;
+}
+
+.cardSize {
+  font-size: $font-xs;
+  color: $color-text-muted;
+  font-family: $font-mono;
+}
+
+.cardMeta {
+  display: flex;
+  gap: $space-12;
+}
+
+.cardDate {
+  font-size: $font-sm;
+  color: $color-text-secondary;
+}
+
+.cardTime {
+  font-size: $font-sm;
+  color: $color-text-muted;
+}
+
+// ── Transcript viewer ───────────────────────────
+.transcriptContent {
+  font-size: $font-sm;
+  color: $color-text;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: $font-sans;
+  line-height: 1.6;
+  max-height: 600px;
+  overflow-y: auto;
+}

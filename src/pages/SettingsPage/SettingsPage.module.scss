@@ -114,3 +114,27 @@
 .pathInput::placeholder {
   color: $color-text-muted;
 }
+
+// ── Number input ───────────────────────────────
+.numberInput {
+  width: 100px;
+  padding: $space-10 $space-14;
+  font-size: $font-base;
+  font-family: $font-mono;
+  color: $color-text;
+  background-color: $color-bg;
+  border: $border-1 solid $color-border;
+  border-radius: $radius-8;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.numberInput:focus {
+  border-color: $color-accent;
+}
+
+.inputSuffix {
+  font-size: $font-sm;
+  color: $color-text-secondary;
+  align-self: center;
+}

@@ -50,22 +50,22 @@ Example output:
 
 ## Feature Tiers
 
-### Tier 1 — MVP (Walking Skeleton)
-1. Microphone audio capture
-2. System audio capture (loopback)
-3. Real-time transcription (local via whisper-rs)
-4. Live transcript display in the UI
-5. Basic start/stop recording controls
-6. Speaker labeling: "Me" (mic) vs "Others" (system audio)
-7. Full transcript saved to Markdown file (timestamped, speaker-labeled)
+### Tier 1 — MVP (Walking Skeleton) ✅
+1. ✅ Microphone audio capture
+2. ✅ System audio capture (loopback)
+3. ✅ Real-time transcription (local via whisper-rs)
+4. ✅ Live transcript display in the UI
+5. ✅ Start/stop/pause/resume recording controls
+6. ✅ Speaker labeling: "Me" (mic) vs "Others" (system audio)
+7. ✅ Full transcript saved to Markdown file (timestamped, speaker-labeled, created up-front, saved periodically)
 
 ### Tier 2 — Usable Product
 8. Post-meeting AI summary generation via LLM (key points + action items, ignoring small talk)
 9. Summary saved to Markdown file alongside transcript
 10. Notepad editor for user notes during meetings
-11. Meeting list/browser view (reads from output directory)
-12. Configurable output directory (for Obsidian vault targeting)
-13. Auto-stop after configurable silence duration
+11. ✅ Meeting list/browser view (reads from output directory, live refresh)
+12. ✅ Configurable output directory (for Obsidian vault targeting)
+13. ✅ Auto-stop after configurable silence duration
 
 ### Tier 3 — Polish & Power Features
 14. Obsidian vault sync integration (configurable vault path, wikilinks, tags)
@@ -201,7 +201,7 @@ This is exactly how Granola handles desktop diarization. No ML models needed.
 
 **Chosen: Tauri Channels (`tauri::ipc::Channel<T>`)** for streaming transcript data.
 
-Channels provide ordered delivery, strong typing via Serde, and significantly better throughput than the event system. Events will be used only for low-frequency state changes (recording started/stopped).
+Channels provide ordered delivery, strong typing via Serde, and significantly better throughput than the event system. Events are used for low-frequency notifications (e.g., `meetings-changed` to trigger UI refresh when transcripts are created/updated).
 
 ```rust
 #[derive(Clone, Serialize)]
@@ -282,10 +282,10 @@ Each meeting produces two files, named with an ISO 8601 date prefix and a meetin
 
 ---
 
-## Rust Crate Dependencies (Planned)
+## Rust Crate Dependencies
 
 ```toml
-# Audio capture (Phase 1 — installed)
+# Audio capture (Phase 1)
 cpal = "0.15"              # Microphone capture via ALSA (Linux)
 libpulse-binding = "2.28"  # PulseAudio API for system audio monitor sources (Linux)
 libpulse-simple-binding = "2.28"  # PulseAudio Simple API for capture
@@ -293,19 +293,26 @@ ringbuf = "0.4"            # Lock-free SPSC ring buffers
 rubato = "0.15"            # Sample rate conversion (→ 16kHz for Whisper)
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros"] }
 
-# Transcription (Phase 2 — installed)
+# Transcription (Phase 2)
 whisper-rs = "0.16"        # Local Whisper transcription (requires clang for build)
 reqwest = "0.12"           # Model download from Hugging Face (blocking + stream features)
+
+# Persistence (Phase 3)
+chrono = "0.4"             # Date/time formatting for filenames and transcript headers
+dirs = "6"                 # Cross-platform home directory resolution
 
 # Platform-specific system audio (Phase 5 — not yet installed)
 # wasapi = "0.19"          # WASAPI loopback capture (Windows)
 # screencapturekit = "1.5" # ScreenCaptureKit (macOS)
 
-# Already present from boilerplate
+# Core framework
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
+
+[dev-dependencies]
+tempfile = "3"             # Isolated temp directories for file system tests
 ```
 
 ---
@@ -347,14 +354,27 @@ tauri-plugin-opener = "2"
 - Model management: models stored in `~/.local/share/echonotes/models/`, downloaded via `reqwest::blocking` from Hugging Face.
 - Frontend uses Tauri `Channel` API — `startRecording` creates a channel and passes an `onTranscript` callback. Model download UI shown when model is not yet available.
 
-### Phase 3: Markdown Output & Persistence
+### Phase 3: Markdown Output & Persistence ✅
 **Complexity: Medium | Focus: Producing useful output files**
 
-- [ ] **3.1** Generate transcript Markdown file — full timestamped, speaker-labeled, on meeting end
-- [ ] **3.2** Configurable output directory (default `~/EchoNotes/`)
-- [ ] **3.3** File naming: `YYYY-MM-DD HH.MM <Meeting Name>.md` / `- Transcript.md` with name resolution (window title → LLM-generated → fallback)
-- [ ] **3.4** Meeting list/browser view in the UI (reads from output directory)
-- [ ] **3.5** Auto-stop after silence timeout
+- [x] **3.1** Generate transcript Markdown file — full timestamped, speaker-labeled, created at recording start and updated periodically + on stop
+- [x] **3.2** Configurable output directory (default `~/EchoNotes/`) — settings UI with save/reset
+- [x] **3.3** File naming: `YYYY-MM-DD HH.MM <Meeting Name> - Transcript.md` with fallback name resolution (`Meeting at HH-MM`)
+- [x] **3.4** Meeting list/browser view in the UI — reads from output directory, click to view transcript, live refresh via Tauri events
+- [x] **3.5** Auto-stop after configurable silence timeout — worker tracks silence duration, frontend detects via level polling
+- [x] **3.6** Pause/resume recording — audio streams continue but samples are discarded while paused, timer freezes, silence timeout resets
+- [x] **3.7** Periodic transcript saving — worker shares segments via `Arc<Mutex>`, frontend triggers save every 30s, backend rewrites file atomically
+- [x] **3.8** Up-front file creation — transcript file created immediately at recording start so it appears in the meetings list
+- [x] **3.9** Current session nav link — appears in nav bar during recording when not on the recording page
+- [x] **3.10** Settings persistence — mic/system device, gain, VAD threshold, models dir, output dir, silence timeout saved to `~/.config/` via `#[serde(default)]` JSON
+
+**Implementation notes:**
+- Settings stored as JSON in `app_config_dir()` (`~/.config/com.smashedtatoes.echonotes/settings.json`), loaded on startup via Tauri setup hook. Uses `#[serde(default)]` for forward-compatible deserialization — missing fields get defaults, unknown fields are ignored.
+- Transcript generation in `markdown.rs`: `write_transcript()` creates new files (used at recording start), `update_transcript()` rewrites existing files atomically (tmp+rename pattern) for periodic saves and final stop.
+- `TranscriptionWorker` maintains a shared `Arc<Mutex<Vec<TranscriptSegment>>>` that the worker thread pushes to alongside its local accumulator. The `save_current_transcript` command reads from this shared state.
+- Pause/resume uses an `Arc<AtomicBool>` in the worker. When paused, ring buffers are still drained (to prevent overflow) but samples are discarded. The silence timeout clock resets while paused to prevent false triggers.
+- Meetings list in `MeetingsPage` auto-refreshes via `@tauri-apps/api/event` `listen("meetings-changed")`. Backend emits this event on recording start, periodic save, and stop.
+- Meeting name resolution currently uses fallback only (`Meeting at HH-MM`). Window title detection and LLM-generated titles deferred to later phases.
 
 ### Phase 4: AI Summary & Notepad
 **Complexity: Medium | Focus: The "magic" feature**
@@ -364,7 +384,7 @@ tauri-plugin-opener = "2"
 - [ ] **4.3** Rich text notepad editor for user notes during meetings (TipTap)
 - [ ] **4.4** Save user notes as `notes.md` alongside transcript and summary
 - [ ] **4.5** Note template system (shapes the AI summary structure)
-- [ ] **4.6** Configurable output path for Obsidian vault targeting
+- [ ] **4.6** Meeting name detection from window titles / LLM-generated titles
 
 ### Phase 5: Platform Expansion & Polish
 **Complexity: High | Focus: Cross-platform + advanced features**
@@ -379,11 +399,11 @@ tauri-plugin-opener = "2"
 
 ## Open Questions
 
-1. **Model distribution** — Bundle Whisper model with the app (large binary) or download on first run?
-   - *Recommendation:* Download on first run with a progress indicator. The `base` model is 140MB.
+1. **Model distribution** — ~~Bundle Whisper model with the app (large binary) or download on first run?~~
+   - *Resolved:* Download on first run with progress indicator. Model management UI in Settings page.
 
-2. **Concurrent transcription** — Transcribe mic and system audio as separate Whisper instances, or mix into one stream?
-   - *Recommendation:* Separate instances for speaker labeling. Two `base` model instances should fit in ~300MB RAM.
+2. **Concurrent transcription** — ~~Transcribe mic and system audio as separate Whisper instances, or mix into one stream?~~
+   - *Resolved:* Single Whisper context shared on one worker thread, mic and system audio processed as alternating segments with speaker labels.
 
 3. **LLM for note enhancement** — Local (Ollama) or cloud (OpenAI/Anthropic)?
    - *Recommendation:* Support both. Default to cloud for quality, offer local for privacy.

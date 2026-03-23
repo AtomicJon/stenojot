@@ -18,6 +18,10 @@ pub enum Speaker {
 pub struct AudioLevels {
     pub mic_rms: f32,
     pub system_rms: f32,
+    /// True if the recording is currently paused.
+    pub is_paused: bool,
+    /// True if the worker auto-stopped due to silence timeout.
+    pub auto_stopped: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

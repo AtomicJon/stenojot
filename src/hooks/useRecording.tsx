@@ -15,6 +15,9 @@ import {
   setPreferredSystemDevice,
   startRecording,
   stopRecording,
+  pauseRecording,
+  resumeRecording,
+  saveCurrentTranscript,
   getAudioLevels,
   getModelInfo,
   getMicGain,
@@ -24,11 +27,16 @@ import {
 } from "../lib/commands";
 import type { AudioDevice, AudioLevels, TranscriptSegment } from "../types";
 
+/** How often to auto-save the transcript during recording (ms). */
+const AUTO_SAVE_INTERVAL_MS = 30_000;
+
 /** Shape of the recording context exposed to all pages. */
 export interface RecordingState {
   /** Whether a recording session is active. */
   isRecording: boolean;
-  /** Elapsed seconds since recording started. */
+  /** Whether the recording is currently paused. */
+  isPaused: boolean;
+  /** Elapsed seconds since recording started (excludes paused time). */
   elapsedSeconds: number;
   /** Live RMS audio levels for mic and system streams. */
   audioLevels: AudioLevels;
@@ -61,8 +69,16 @@ export interface RecordingState {
 
   /** Start a recording session. */
   handleStart: () => Promise<void>;
-  /** Stop the current recording session. */
-  handleStop: () => Promise<void>;
+  /** Stop the current recording session. Returns the transcript path if saved. */
+  handleStop: () => Promise<string | null>;
+  /** Pause the current recording. */
+  handlePause: () => Promise<void>;
+  /** Resume a paused recording. */
+  handleResume: () => Promise<void>;
+  /** Path to the current session's transcript file. */
+  currentTranscriptPath: string | null;
+  /** Path to the last saved transcript file (after stop). */
+  lastTranscriptPath: string | null;
   /** Re-check model download status. */
   refreshModelStatus: () => Promise<void>;
 }
@@ -88,18 +104,26 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
   const [micDeviceId, setMicDeviceId] = useState("");
   const [systemDeviceId, setSystemDeviceId] = useState("");
   const [isRecording, setIsRecording] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [audioLevels, setAudioLevels] = useState<AudioLevels>({
     mic_rms: 0,
     system_rms: 0,
+    is_paused: false,
+    auto_stopped: false,
   });
   const [segments, setSegments] = useState<TranscriptSegment[]>([]);
   const [modelReady, setModelReady] = useState(false);
   const [micGainValue, setMicGainValue] = useState(1.0);
   const [vadThresholdValue, setVadThresholdValue] = useState(0.005);
+  const [lastTranscriptPath, setLastTranscriptPath] = useState<string | null>(null);
+  const [currentTranscriptPath, setCurrentTranscriptPath] = useState<string | null>(null);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const levelPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const autoSaveRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const handleStopRef = useRef<(() => Promise<string | null>) | null>(null);
+  const isPausedRef = useRef(false);
 
   // Fetch devices, audio settings, and model status on mount.
   // Persisted settings are used to restore preferred devices if still available.
@@ -119,7 +143,6 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
       try {
         const micDevs = await getAudioDevices();
         setMicDevices(micDevs);
-        // Restore preferred device if it's still connected, else fall back to default
         const preferred = preferredMicId
           ? micDevs.find((d) => d.id === preferredMicId)
           : null;
@@ -164,6 +187,7 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
       if (levelPollRef.current) clearInterval(levelPollRef.current);
+      if (autoSaveRef.current) clearInterval(autoSaveRef.current);
     };
   }, []);
 
@@ -179,37 +203,62 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
   const handleStart = useCallback(async () => {
     try {
       setSegments([]);
-      await startRecording(micDeviceId, systemDeviceId, (segment) => {
+      const result = await startRecording(micDeviceId, systemDeviceId, (segment) => {
         setSegments((prev) => [...prev, segment]);
       });
       setIsRecording(true);
+      setIsPaused(false);
+      isPausedRef.current = false;
       setElapsedSeconds(0);
+      setCurrentTranscriptPath(result.transcript_path);
 
+      // Elapsed timer — skips ticks while paused
       timerRef.current = setInterval(() => {
-        setElapsedSeconds((prev) => prev + 1);
+        if (!isPausedRef.current) {
+          setElapsedSeconds((prev) => prev + 1);
+        }
       }, 1000);
 
+      // Audio level polling
       levelPollRef.current = setInterval(async () => {
         try {
           const levels = await getAudioLevels();
           setAudioLevels(levels);
+          if (levels.auto_stopped) {
+            handleStopRef.current?.();
+          }
         } catch {
           // Silently ignore polling errors
         }
       }, 100);
+
+      // Periodic transcript save
+      autoSaveRef.current = setInterval(async () => {
+        try {
+          await saveCurrentTranscript();
+        } catch {
+          // Silently ignore save errors
+        }
+      }, AUTO_SAVE_INTERVAL_MS);
     } catch (err) {
       console.error("Failed to start recording:", err);
     }
   }, [micDeviceId, systemDeviceId]);
 
-  const handleStop = useCallback(async () => {
+  const handleStop = useCallback(async (): Promise<string | null> => {
+    let transcriptPath: string | null = null;
     try {
-      await stopRecording();
+      const result = await stopRecording();
+      transcriptPath = result.transcript_path;
+      setLastTranscriptPath(transcriptPath);
     } catch (err) {
       console.error("Failed to stop recording:", err);
     } finally {
       setIsRecording(false);
-      setAudioLevels({ mic_rms: 0, system_rms: 0 });
+      setIsPaused(false);
+      isPausedRef.current = false;
+      setCurrentTranscriptPath(null);
+      setAudioLevels({ mic_rms: 0, system_rms: 0, is_paused: false, auto_stopped: false });
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
@@ -218,6 +267,34 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
         clearInterval(levelPollRef.current);
         levelPollRef.current = null;
       }
+      if (autoSaveRef.current) {
+        clearInterval(autoSaveRef.current);
+        autoSaveRef.current = null;
+      }
+    }
+    return transcriptPath;
+  }, []);
+
+  // Keep ref in sync so the level poll can trigger auto-stop
+  handleStopRef.current = handleStop;
+
+  const handlePause = useCallback(async () => {
+    try {
+      await pauseRecording();
+      setIsPaused(true);
+      isPausedRef.current = true;
+    } catch (err) {
+      console.error("Failed to pause recording:", err);
+    }
+  }, []);
+
+  const handleResume = useCallback(async () => {
+    try {
+      await resumeRecording();
+      setIsPaused(false);
+      isPausedRef.current = false;
+    } catch (err) {
+      console.error("Failed to resume recording:", err);
     }
   }, []);
 
@@ -255,6 +332,7 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
 
   const value: RecordingState = {
     isRecording,
+    isPaused,
     elapsedSeconds,
     audioLevels,
     segments,
@@ -271,6 +349,10 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
     handleVadChange,
     handleStart,
     handleStop,
+    handlePause,
+    handleResume,
+    currentTranscriptPath,
+    lastTranscriptPath,
     refreshModelStatus,
   };
 

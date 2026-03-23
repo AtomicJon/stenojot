@@ -2,8 +2,11 @@ import { invoke, Channel } from "@tauri-apps/api/core";
 import type {
   AudioDevice,
   AudioLevels,
+  MeetingEntry,
   ModelInfo,
   PersistedSettings,
+  StartRecordingResult,
+  StopRecordingResult,
   TranscriptSegment,
 } from "../types";
 
@@ -19,7 +22,7 @@ export function getSystemAudioDevices(): Promise<AudioDevice[]> {
 
 /**
  * Start recording from the given mic and system audio devices.
- * Streams transcript segments back via a Tauri Channel.
+ * Creates the transcript file immediately and streams segments via a Tauri Channel.
  * @param micDeviceId - ID of the microphone device
  * @param systemDeviceId - ID of the system audio device
  * @param onTranscript - Callback invoked for each incoming transcript segment
@@ -28,19 +31,34 @@ export function startRecording(
   micDeviceId: string,
   systemDeviceId: string,
   onTranscript: (segment: TranscriptSegment) => void
-): Promise<void> {
+): Promise<StartRecordingResult> {
   const channel = new Channel<TranscriptSegment>();
   channel.onmessage = onTranscript;
-  return invoke("start_recording", {
+  return invoke<StartRecordingResult>("start_recording", {
     micDeviceId,
     systemDeviceId,
     onTranscript: channel,
   });
 }
 
-/** Stop the current recording. */
-export function stopRecording(): Promise<void> {
-  return invoke("stop_recording");
+/** Pause the current recording session. Audio is discarded while paused. */
+export function pauseRecording(): Promise<void> {
+  return invoke("pause_recording");
+}
+
+/** Resume a paused recording session. */
+export function resumeRecording(): Promise<void> {
+  return invoke("resume_recording");
+}
+
+/** Save the current transcript to disk (periodic save during recording). */
+export function saveCurrentTranscript(): Promise<number> {
+  return invoke<number>("save_current_transcript");
+}
+
+/** Stop the current recording and return transcript info. */
+export function stopRecording(): Promise<StopRecordingResult> {
+  return invoke<StopRecordingResult>("stop_recording");
 }
 
 /** Get current audio RMS levels for both streams. */
@@ -127,4 +145,40 @@ export function deleteModel(): Promise<void> {
  */
 export function setModelsDir(path: string): Promise<void> {
   return invoke("set_models_dir", { path });
+}
+
+/**
+ * Set and persist the output directory for transcript files.
+ * Pass an empty string to reset to the default (`~/EchoNotes/`).
+ * @param path - Absolute path to the output directory
+ */
+export function setOutputDir(path: string): Promise<void> {
+  return invoke("set_output_dir", { path });
+}
+
+/** Get the resolved output directory path. */
+export function getOutputDir(): Promise<string> {
+  return invoke<string>("get_output_dir");
+}
+
+/**
+ * Set and persist the auto-stop silence timeout.
+ * Pass 0 to disable auto-stop.
+ * @param seconds - Timeout in seconds (0 = disabled)
+ */
+export function setSilenceTimeout(seconds: number): Promise<void> {
+  return invoke("set_silence_timeout", { seconds });
+}
+
+/** List meetings in the output directory. */
+export function listMeetings(): Promise<MeetingEntry[]> {
+  return invoke<MeetingEntry[]>("list_meetings");
+}
+
+/**
+ * Read the contents of a transcript file.
+ * @param path - Absolute path to the transcript file
+ */
+export function readMeetingTranscript(path: string): Promise<string> {
+  return invoke<string>("read_meeting_transcript", { path });
 }

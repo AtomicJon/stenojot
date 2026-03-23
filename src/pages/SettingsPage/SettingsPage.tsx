@@ -4,6 +4,10 @@ import {
   downloadModel,
   deleteModel,
   setModelsDir,
+  getOutputDir,
+  setOutputDir,
+  setSilenceTimeout,
+  getSettings,
 } from "../../lib/commands";
 import { formatFileSize } from "../../lib/format";
 import { useRecording } from "../../hooks/useRecording";
@@ -30,6 +34,10 @@ export function SettingsPage() {
   const [isDownloading, setIsDownloading] = useState(false);
   const [customPath, setCustomPath] = useState("");
   const [pathSaved, setPathSaved] = useState(false);
+  const [outputDir, setOutputDirState] = useState("");
+  const [outputDirSaved, setOutputDirSaved] = useState(false);
+  const [silenceTimeout, setSilenceTimeoutState] = useState<number>(300);
+  const [timeoutSaved, setTimeoutSaved] = useState(false);
 
   /** Load model info from the backend. */
   const loadModelInfo = useCallback(async () => {
@@ -44,6 +52,16 @@ export function SettingsPage() {
 
   useEffect(() => {
     loadModelInfo();
+    async function loadOutputSettings() {
+      try {
+        const [dir, settings] = await Promise.all([getOutputDir(), getSettings()]);
+        setOutputDirState(dir);
+        setSilenceTimeoutState(settings.silence_timeout_seconds ?? 0);
+      } catch (err) {
+        console.error("Failed to load output settings:", err);
+      }
+    }
+    loadOutputSettings();
   }, [loadModelInfo]);
 
   /** Download the Whisper transcription model. */
@@ -92,6 +110,39 @@ export function SettingsPage() {
       console.error("Failed to reset models dir:", err);
     }
   }, [loadModelInfo]);
+
+  /** Save a custom output directory path. */
+  const handleSaveOutputDir = useCallback(async () => {
+    try {
+      await setOutputDir(outputDir);
+      setOutputDirSaved(true);
+      setTimeout(() => setOutputDirSaved(false), 2000);
+    } catch (err) {
+      console.error("Failed to set output dir:", err);
+    }
+  }, [outputDir]);
+
+  /** Reset the output directory to the default location. */
+  const handleResetOutputDir = useCallback(async () => {
+    try {
+      await setOutputDir("");
+      const dir = await getOutputDir();
+      setOutputDirState(dir);
+    } catch (err) {
+      console.error("Failed to reset output dir:", err);
+    }
+  }, []);
+
+  /** Save the silence timeout setting. */
+  const handleSaveSilenceTimeout = useCallback(async () => {
+    try {
+      await setSilenceTimeout(silenceTimeout);
+      setTimeoutSaved(true);
+      setTimeout(() => setTimeoutSaved(false), 2000);
+    } catch (err) {
+      console.error("Failed to set silence timeout:", err);
+    }
+  }, [silenceTimeout]);
 
   const micOptions = micDevices.map((d) => ({
     value: d.id,
@@ -218,6 +269,58 @@ export function SettingsPage() {
         <Button variant="link" onClick={handleResetPath}>
           Reset to Default
         </Button>
+      </Panel>
+
+      {/* Output Directory */}
+      <Panel title="Output Directory">
+        <p className={s.sectionDesc}>
+          Where transcript files are saved. Defaults to ~/EchoNotes/.
+        </p>
+
+        <div className={s.pathInputRow}>
+          <input
+            type="text"
+            className={s.pathInput}
+            value={outputDir}
+            onChange={(e) => {
+              setOutputDirState(e.target.value);
+              setOutputDirSaved(false);
+            }}
+            placeholder="Enter custom output directory path"
+          />
+          <Button onClick={handleSaveOutputDir}>
+            {outputDirSaved ? "Saved" : "Save"}
+          </Button>
+        </div>
+
+        <Button variant="link" onClick={handleResetOutputDir}>
+          Reset to Default
+        </Button>
+      </Panel>
+
+      {/* Auto-Stop */}
+      <Panel title="Auto-Stop">
+        <p className={s.sectionDesc}>
+          Automatically stop recording after a period of silence. Set to 0 to disable.
+        </p>
+
+        <div className={s.pathInputRow}>
+          <input
+            type="number"
+            className={s.numberInput}
+            value={silenceTimeout}
+            onChange={(e) => {
+              setSilenceTimeoutState(Math.max(0, parseInt(e.target.value) || 0));
+              setTimeoutSaved(false);
+            }}
+            min={0}
+            step={30}
+          />
+          <span className={s.inputSuffix}>seconds</span>
+          <Button onClick={handleSaveSilenceTimeout}>
+            {timeoutSaved ? "Saved" : "Save"}
+          </Button>
+        </div>
       </Panel>
     </>
   );

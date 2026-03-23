@@ -1,4 +1,4 @@
-import { Link, Outlet } from "react-router-dom";
+import { Link, Outlet, useLocation } from "react-router-dom";
 import { useRecording } from "../../hooks/useRecording";
 import { formatTime } from "../../lib/format";
 import s from "./Layout.module.scss";
@@ -7,11 +7,17 @@ import s from "./Layout.module.scss";
 export function Layout() {
   const {
     isRecording,
+    isPaused,
     elapsedSeconds,
     modelReady,
     handleStart,
     handleStop,
+    handlePause,
+    handleResume,
   } = useRecording();
+
+  const location = useLocation();
+  const isOnRecordingPage = location.pathname === "/";
 
   return (
     <div className={s.shell}>
@@ -20,11 +26,27 @@ export function Layout() {
           EchoNotes
         </Link>
         <div className={s.navRight}>
+          {isRecording && !isOnRecordingPage && (
+            <Link to="/" className={s.navSessionLink}>
+              Current Session
+            </Link>
+          )}
           {isRecording && (
             <div className={s.recordingStatus}>
-              <span className={s.recordingDot} />
-              <span className={s.timer}>{formatTime(elapsedSeconds)}</span>
+              <span className={isPaused ? s.recordingDotPaused : s.recordingDot} />
+              <span className={s.timer}>
+                {formatTime(elapsedSeconds)}
+                {isPaused && <span className={s.pausedLabel}> Paused</span>}
+              </span>
             </div>
+          )}
+          {isRecording && (
+            <button
+              className={s.navPauseBtn}
+              onClick={isPaused ? handleResume : handlePause}
+            >
+              {isPaused ? "Resume" : "Pause"}
+            </button>
           )}
           <button
             className={`${s.navRecordBtn} ${isRecording ? s.navRecordBtnActive : ""}`}
@@ -33,6 +55,9 @@ export function Layout() {
           >
             {isRecording ? "Stop" : "Record"}
           </button>
+          <Link to="/meetings" className={s.navLink}>
+            Meetings
+          </Link>
           <Link to="/settings" className={s.navLink}>
             Settings
           </Link>

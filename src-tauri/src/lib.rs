@@ -1,5 +1,6 @@
 mod audio;
 mod commands;
+mod markdown;
 mod settings;
 mod transcription;
 
@@ -37,6 +38,9 @@ pub fn run() {
             app_state.preferred_mic_device_id = persisted.mic_device_id;
             app_state.preferred_system_device_id = persisted.system_device_id;
 
+            app_state.output_dir = persisted.output_dir;
+            app_state.silence_timeout_seconds = persisted.silence_timeout_seconds;
+
             if let Some(ref dir) = persisted.models_dir {
                 let _ = transcription::manager::set_models_dir(PathBuf::from(dir));
             }
@@ -60,6 +64,14 @@ pub fn run() {
             commands::delete_model,
             commands::set_models_dir,
             commands::download_model,
+            commands::set_output_dir,
+            commands::get_output_dir,
+            commands::set_silence_timeout,
+            commands::list_meetings,
+            commands::read_meeting_transcript,
+            commands::pause_recording,
+            commands::resume_recording,
+            commands::save_current_transcript,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

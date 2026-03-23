@@ -5,12 +5,13 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::ipc::Channel;
-use tauri::State;
+use tauri::{Emitter, State};
 
 use crate::audio::capture;
 use crate::audio::pipeline;
 use crate::audio::system_capture::{self, SystemCaptureHandle};
 use crate::audio::types::{AudioDevice, AudioLevels, CaptureError, TranscriptSegment};
+use crate::markdown;
 use crate::settings::{self, Settings};
 use crate::transcription::manager::{self, ModelInfo};
 use crate::transcription::worker::TranscriptionWorker;
@@ -39,6 +40,18 @@ pub struct AppState {
     pub system_channels: u16,
     /// App config directory for persisting settings.
     pub config_dir: PathBuf,
+    /// Custom output directory for transcript files (None = ~/EchoNotes/).
+    pub output_dir: Option<String>,
+    /// Auto-stop silence timeout in seconds (None = disabled).
+    pub silence_timeout_seconds: Option<u32>,
+    /// Timestamp when the current recording started.
+    pub recording_start_time: Option<chrono::DateTime<chrono::Local>>,
+    /// Whether the recording is currently paused.
+    pub is_paused: bool,
+    /// Path to the transcript file for the current recording session.
+    pub current_transcript_path: Option<PathBuf>,
+    /// Meeting name for the current recording session.
+    pub current_meeting_name: Option<String>,
 }
 
 // Safety: cpal::Stream is !Send and !Sync, but we only ever access it
@@ -71,6 +84,12 @@ impl AppState {
             system_sample_rate: 0,
             system_channels: 0,
             config_dir: PathBuf::new(),
+            output_dir: None,
+            silence_timeout_seconds: Some(300),
+            recording_start_time: None,
+            is_paused: false,
+            current_transcript_path: None,
+            current_meeting_name: None,
         }
     }
 }
@@ -84,6 +103,8 @@ fn save_current_settings(app_state: &AppState) {
         vad_threshold: f32::from_bits(app_state.vad_threshold.load(Ordering::Relaxed)),
         models_dir: manager::get_custom_models_dir()
             .map(|p| p.to_string_lossy().to_string()),
+        output_dir: app_state.output_dir.clone(),
+        silence_timeout_seconds: app_state.silence_timeout_seconds,
     };
     if let Err(e) = settings::save(&app_state.config_dir, &settings) {
         eprintln!("Failed to save settings: {}", e);
@@ -131,17 +152,58 @@ pub fn set_preferred_system_device(device_id: String, state: State<'_, Mutex<App
     Ok(())
 }
 
+/// Set and persist the output directory for transcript files.
+///
+/// Pass an empty string to reset to the default (`~/EchoNotes/`).
+#[tauri::command]
+pub fn set_output_dir(path: String, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
+    let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    app_state.output_dir = if path.is_empty() { None } else { Some(path) };
+    save_current_settings(&app_state);
+    Ok(())
+}
+
+/// Get the resolved output directory path.
+#[tauri::command]
+pub fn get_output_dir(state: State<'_, Mutex<AppState>>) -> Result<String, String> {
+    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let loaded = settings::load(&app_state.config_dir);
+    Ok(loaded.output_dir_resolved().to_string_lossy().to_string())
+}
+
+/// Set and persist the auto-stop silence timeout.
+///
+/// Pass 0 to disable auto-stop.
+#[tauri::command]
+pub fn set_silence_timeout(seconds: u32, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
+    let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    app_state.silence_timeout_seconds = if seconds == 0 { None } else { Some(seconds) };
+    save_current_settings(&app_state);
+    Ok(())
+}
+
+/// Result returned by `start_recording`.
+#[derive(serde::Serialize)]
+pub struct StartRecordingResult {
+    /// Path to the newly created transcript file.
+    pub transcript_path: String,
+    /// Meeting name used for this session.
+    pub meeting_name: String,
+}
+
 /// Start recording from the specified mic and system audio devices.
 ///
 /// Launches audio capture streams and a background transcription worker
 /// that sends `TranscriptSegment`s to the frontend via the provided channel.
+/// Creates the transcript file immediately so it appears in the meetings list.
 #[tauri::command]
 pub fn start_recording(
     mic_device_id: String,
     system_device_id: String,
     on_transcript: Channel<TranscriptSegment>,
     state: State<'_, Mutex<AppState>>,
-) -> Result<(), String> {
+    app: tauri::AppHandle,
+) -> Result<StartRecordingResult, String> {
     let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
 
     if app_state.is_recording {
@@ -186,7 +248,22 @@ pub fn start_recording(
         app_state.system_sample_rate,
         app_state.system_channels,
         Arc::clone(&app_state.vad_threshold),
+        app_state.silence_timeout_seconds,
         on_transcript,
+    )?;
+
+    let start_time = chrono::Local::now();
+    let loaded = settings::load(&app_state.config_dir);
+    let output_dir = loaded.output_dir_resolved();
+    let meeting_name = markdown::resolve_meeting_name(&start_time);
+
+    // Create the transcript file immediately with just the header
+    let transcript_path = markdown::write_transcript(
+        &output_dir,
+        &[],
+        &meeting_name,
+        start_time,
+        start_time,
     )?;
 
     app_state.mic_stream = Some(mic_handle.stream);
@@ -195,15 +272,38 @@ pub fn start_recording(
     app_state.system_device_id = Some(system_device_id);
     app_state.worker = Some(worker);
     app_state.is_recording = true;
+    app_state.is_paused = false;
+    app_state.recording_start_time = Some(start_time);
+    app_state.current_transcript_path = Some(transcript_path.clone());
+    app_state.current_meeting_name = Some(meeting_name.clone());
 
-    Ok(())
+    // Notify frontend that meetings list changed
+    let _ = app.emit("meetings-changed", ());
+
+    Ok(StartRecordingResult {
+        transcript_path: transcript_path.to_string_lossy().to_string(),
+        meeting_name,
+    })
+}
+
+/// Result returned by `stop_recording`.
+#[derive(serde::Serialize)]
+pub struct StopRecordingResult {
+    /// Path to the saved transcript file, if any segments were recorded.
+    pub transcript_path: Option<String>,
+    /// Number of transcript segments in the recording.
+    pub segment_count: usize,
 }
 
 /// Stop the current recording session.
 ///
-/// Drops audio streams, stops the transcription worker, and resets state.
+/// Drops audio streams, stops the transcription worker, writes the final
+/// transcript to the file created at start, and resets state.
 #[tauri::command]
-pub fn stop_recording(state: State<'_, Mutex<AppState>>) -> Result<(), String> {
+pub fn stop_recording(
+    state: State<'_, Mutex<AppState>>,
+    app: tauri::AppHandle,
+) -> Result<StopRecordingResult, String> {
     let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
 
     if !app_state.is_recording {
@@ -219,18 +319,47 @@ pub fn stop_recording(state: State<'_, Mutex<AppState>>) -> Result<(), String> {
     app_state.mic_device_id = None;
     app_state.system_device_id = None;
     app_state.is_recording = false;
+    app_state.is_paused = false;
 
-    // Stop the transcription worker (flushes remaining audio)
-    if let Some(ref mut worker) = app_state.worker {
-        worker.stop();
-    }
+    // Stop the transcription worker and collect accumulated segments
+    let segments = if let Some(ref mut worker) = app_state.worker {
+        worker.stop()
+    } else {
+        Vec::new()
+    };
     app_state.worker = None;
 
     // Reset RMS levels
     app_state.mic_rms.store(0u32, Ordering::Relaxed);
     app_state.system_rms.store(0u32, Ordering::Relaxed);
 
-    Ok(())
+    // Write final transcript to the file created at start
+    let segment_count = segments.len();
+    let transcript_path = app_state.current_transcript_path.take();
+    let meeting_name = app_state.current_meeting_name.take();
+    let start_time = app_state
+        .recording_start_time
+        .take()
+        .unwrap_or_else(chrono::Local::now);
+
+    let path_str = if let Some(ref path) = transcript_path {
+        let end_time = chrono::Local::now();
+        let name = meeting_name.as_deref().unwrap_or("Meeting");
+        if let Err(e) = markdown::update_transcript(path, &segments, name, start_time, end_time) {
+            eprintln!("Failed to write final transcript: {}", e);
+        }
+        Some(path.to_string_lossy().to_string())
+    } else {
+        None
+    };
+
+    // Notify frontend that meetings list changed
+    let _ = app.emit("meetings-changed", ());
+
+    Ok(StopRecordingResult {
+        transcript_path: path_str,
+        segment_count,
+    })
 }
 
 /// Get current audio input levels for the mic and system streams.
@@ -241,9 +370,17 @@ pub fn get_audio_levels(state: State<'_, Mutex<AppState>>) -> Result<AudioLevels
     let mic_rms = f32::from_bits(app_state.mic_rms.load(Ordering::Relaxed));
     let system_rms = f32::from_bits(app_state.system_rms.load(Ordering::Relaxed));
 
+    let auto_stopped = app_state
+        .worker
+        .as_ref()
+        .map(|w| w.auto_stopped())
+        .unwrap_or(false);
+
     Ok(AudioLevels {
         mic_rms,
         system_rms,
+        is_paused: app_state.is_paused,
+        auto_stopped,
     })
 }
 
@@ -329,4 +466,93 @@ pub fn set_models_dir(path: String, state: State<'_, Mutex<AppState>>) -> Result
 pub fn download_model() -> Result<String, String> {
     let path = manager::download_model_file("base")?;
     Ok(path.to_string_lossy().to_string())
+}
+
+/// List meetings in the output directory.
+#[tauri::command]
+pub fn list_meetings(state: State<'_, Mutex<AppState>>) -> Result<Vec<markdown::MeetingEntry>, String> {
+    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let loaded = settings::load(&app_state.config_dir);
+    let output_dir = loaded.output_dir_resolved();
+    Ok(markdown::list_meetings_in_dir(&output_dir))
+}
+
+/// Read the contents of a transcript file.
+#[tauri::command]
+pub fn read_meeting_transcript(path: String) -> Result<String, String> {
+    std::fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read transcript: {}", e))
+}
+
+/// Pause the current recording session. Audio streams continue but samples
+/// are discarded.
+#[tauri::command]
+pub fn pause_recording(state: State<'_, Mutex<AppState>>) -> Result<(), String> {
+    let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    if !app_state.is_recording {
+        return Err(CaptureError::NotRecording.to_string());
+    }
+    if let Some(ref worker) = app_state.worker {
+        worker.pause();
+    }
+    app_state.is_paused = true;
+    Ok(())
+}
+
+/// Resume a paused recording session.
+#[tauri::command]
+pub fn resume_recording(state: State<'_, Mutex<AppState>>) -> Result<(), String> {
+    let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    if !app_state.is_recording {
+        return Err(CaptureError::NotRecording.to_string());
+    }
+    if let Some(ref worker) = app_state.worker {
+        worker.resume();
+    }
+    app_state.is_paused = false;
+    Ok(())
+}
+
+/// Save the current transcript to disk (periodic save during recording).
+///
+/// Reads segments from the worker's shared accumulator and rewrites the
+/// transcript file that was created at recording start.
+#[tauri::command]
+pub fn save_current_transcript(
+    state: State<'_, Mutex<AppState>>,
+    app: tauri::AppHandle,
+) -> Result<usize, String> {
+    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+
+    if !app_state.is_recording {
+        return Err(CaptureError::NotRecording.to_string());
+    }
+
+    let path = app_state
+        .current_transcript_path
+        .as_ref()
+        .ok_or("No transcript path")?;
+    let name = app_state
+        .current_meeting_name
+        .as_deref()
+        .unwrap_or("Meeting");
+    let start_time = app_state
+        .recording_start_time
+        .unwrap_or_else(chrono::Local::now);
+
+    let segments = app_state
+        .worker
+        .as_ref()
+        .map(|w| w.get_segments())
+        .unwrap_or_default();
+
+    let count = segments.len();
+    let end_time = chrono::Local::now();
+
+    markdown::update_transcript(path, &segments, name, start_time, end_time)?;
+
+    // Notify frontend that meetings list changed
+    let _ = app.emit("meetings-changed", ());
+
+    Ok(count)
 }

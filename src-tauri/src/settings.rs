@@ -24,6 +24,10 @@ pub struct Settings {
     pub vad_threshold: f32,
     /// Custom models directory path (None = use default).
     pub models_dir: Option<String>,
+    /// Output directory for meeting transcript files (None = ~/EchoNotes/).
+    pub output_dir: Option<String>,
+    /// Auto-stop after this many seconds of silence (None = disabled).
+    pub silence_timeout_seconds: Option<u32>,
 }
 
 impl Default for Settings {
@@ -34,6 +38,23 @@ impl Default for Settings {
             mic_gain: 1.0,
             vad_threshold: pipeline::DEFAULT_VAD_THRESHOLD,
             models_dir: None,
+            output_dir: None,
+            silence_timeout_seconds: Some(300),
+        }
+    }
+}
+
+/// Default output directory for transcript files.
+const DEFAULT_OUTPUT_DIR_NAME: &str = "EchoNotes";
+
+impl Settings {
+    /// Resolve the output directory, defaulting to `~/EchoNotes/`.
+    pub fn output_dir_resolved(&self) -> PathBuf {
+        match &self.output_dir {
+            Some(dir) if !dir.is_empty() => PathBuf::from(dir),
+            _ => dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("/tmp"))
+                .join(DEFAULT_OUTPUT_DIR_NAME),
         }
     }
 }
@@ -108,6 +129,8 @@ mod tests {
             mic_gain: 2.5,
             vad_threshold: 0.01,
             models_dir: Some("/custom/models".to_string()),
+            output_dir: Some("/custom/output".to_string()),
+            silence_timeout_seconds: Some(120),
         };
 
         // Act

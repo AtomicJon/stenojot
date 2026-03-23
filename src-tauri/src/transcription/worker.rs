@@ -7,7 +7,7 @@
 //! the resulting `TranscriptSegment` to the frontend via a Tauri `Channel`.
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Instant;
 
@@ -33,8 +33,14 @@ const POLL_INTERVAL_MS: u64 = 100;
 pub struct TranscriptionWorker {
     /// Shared flag the background thread checks each iteration.
     running: Arc<AtomicBool>,
-    /// Join handle for the background thread.
-    handle: Option<thread::JoinHandle<()>>,
+    /// When true, audio is drained but discarded (not accumulated).
+    paused: Arc<AtomicBool>,
+    /// Set to true by the worker when it auto-stops due to silence timeout.
+    auto_stopped: Arc<AtomicBool>,
+    /// Shared segment accumulator — worker pushes, commands read for periodic saves.
+    shared_segments: Arc<Mutex<Vec<TranscriptSegment>>>,
+    /// Join handle for the background thread. Returns accumulated segments.
+    handle: Option<thread::JoinHandle<Vec<TranscriptSegment>>>,
 }
 
 impl TranscriptionWorker {
@@ -58,14 +64,25 @@ impl TranscriptionWorker {
         system_sample_rate: u32,
         system_channels: u16,
         vad_threshold: Arc<AtomicU32>,
+        silence_timeout_seconds: Option<u32>,
         channel: Channel<TranscriptSegment>,
     ) -> Result<Self, String> {
         let running = Arc::new(AtomicBool::new(true));
         let running_clone = Arc::clone(&running);
+        let paused = Arc::new(AtomicBool::new(false));
+        let paused_clone = Arc::clone(&paused);
+        let auto_stopped = Arc::new(AtomicBool::new(false));
+        let auto_stopped_clone = Arc::clone(&auto_stopped);
+        let shared_segments: Arc<Mutex<Vec<TranscriptSegment>>> =
+            Arc::new(Mutex::new(Vec::new()));
+        let shared_segments_clone = Arc::clone(&shared_segments);
 
         let handle = thread::spawn(move || {
             worker_loop(
                 running_clone,
+                paused_clone,
+                auto_stopped_clone,
+                shared_segments_clone,
                 model_path,
                 mic_consumer,
                 system_consumer,
@@ -74,28 +91,69 @@ impl TranscriptionWorker {
                 system_sample_rate,
                 system_channels,
                 vad_threshold,
+                silence_timeout_seconds,
                 channel,
-            );
+            )
         });
 
         Ok(Self {
             running,
+            paused,
+            auto_stopped,
+            shared_segments,
             handle: Some(handle),
         })
     }
 
-    /// Signal the worker to stop and wait for the thread to finish.
-    pub fn stop(&mut self) {
+    /// Pause the worker — audio is still drained but discarded.
+    pub fn pause(&self) {
+        self.paused.store(true, Ordering::SeqCst);
+    }
+
+    /// Resume the worker after a pause.
+    pub fn resume(&self) {
+        self.paused.store(false, Ordering::SeqCst);
+    }
+
+    /// Check whether the worker is currently paused.
+    #[allow(dead_code)]
+    pub fn is_paused(&self) -> bool {
+        self.paused.load(Ordering::SeqCst)
+    }
+
+    /// Check whether the worker auto-stopped due to silence timeout.
+    pub fn auto_stopped(&self) -> bool {
+        self.auto_stopped.load(Ordering::SeqCst)
+    }
+
+    /// Get a snapshot of all accumulated segments so far.
+    pub fn get_segments(&self) -> Vec<TranscriptSegment> {
+        self.shared_segments
+            .lock()
+            .map(|s| s.clone())
+            .unwrap_or_default()
+    }
+
+    /// Signal the worker to stop, wait for the thread to finish, and return
+    /// all accumulated transcript segments from the recording session.
+    pub fn stop(&mut self) -> Vec<TranscriptSegment> {
         self.running.store(false, Ordering::SeqCst);
         if let Some(handle) = self.handle.take() {
-            let _ = handle.join();
+            handle.join().unwrap_or_default()
+        } else {
+            Vec::new()
         }
     }
 }
 
 /// Main loop executed on the worker thread.
+///
+/// Returns all transcript segments accumulated during the recording session.
 fn worker_loop(
     running: Arc<AtomicBool>,
+    paused: Arc<AtomicBool>,
+    auto_stopped: Arc<AtomicBool>,
+    shared_segments: Arc<Mutex<Vec<TranscriptSegment>>>,
     model_path: std::path::PathBuf,
     mut mic_consumer: HeapCons<f32>,
     mut system_consumer: HeapCons<f32>,
@@ -104,8 +162,9 @@ fn worker_loop(
     system_sample_rate: u32,
     system_channels: u16,
     vad_threshold: Arc<AtomicU32>,
+    silence_timeout_seconds: Option<u32>,
     channel: Channel<TranscriptSegment>,
-) {
+) -> Vec<TranscriptSegment> {
     // Load the Whisper model once for the lifetime of the worker
     let ctx = match WhisperContext::new_with_params(
         model_path.to_str().unwrap_or_default(),
@@ -114,11 +173,23 @@ fn worker_loop(
         Ok(ctx) => ctx,
         Err(e) => {
             eprintln!("Failed to load Whisper model: {}", e);
-            return;
+            return Vec::new();
         }
     };
 
     let recording_start = Instant::now();
+    let mut all_segments: Vec<TranscriptSegment> = Vec::new();
+    let mut last_speech_time = Instant::now();
+
+    // Helper: push a segment to both local and shared accumulators
+    let push_segment = |seg: TranscriptSegment,
+                            all: &mut Vec<TranscriptSegment>,
+                            shared: &Arc<Mutex<Vec<TranscriptSegment>>>| {
+        if let Ok(mut shared_segs) = shared.lock() {
+            shared_segs.push(seg.clone());
+        }
+        all.push(seg);
+    };
 
     // Accumulated raw samples (at source rate/channels) for each stream
     let mut mic_raw_buf: Vec<f32> = Vec::new();
@@ -134,7 +205,21 @@ fn worker_loop(
     let mut mic_silence_count: u32 = 0;
     let mut system_silence_count: u32 = 0;
 
+    // Scratch buffer for draining when paused
+    let mut drain_scratch: Vec<f32> = Vec::new();
+
     while running.load(Ordering::SeqCst) {
+        // When paused, drain ring buffers to prevent overflow but discard samples
+        if paused.load(Ordering::SeqCst) {
+            drain_consumer(&mut mic_consumer, &mut drain_scratch);
+            drain_consumer(&mut system_consumer, &mut drain_scratch);
+            drain_scratch.clear();
+            // Reset silence timeout clock while paused
+            last_speech_time = Instant::now();
+            thread::sleep(std::time::Duration::from_millis(POLL_INTERVAL_MS));
+            continue;
+        }
+
         let threshold = f32::from_bits(vad_threshold.load(Ordering::Relaxed));
 
         // Drain mic ring buffer
@@ -148,14 +233,11 @@ fn worker_loop(
         if should_transcribe(&mic_mono, &mut mic_had_speech, &mut mic_silence_count, threshold) {
             let elapsed_ms = recording_start.elapsed().as_millis() as u64;
             if mic_had_speech {
-                transcribe_segment(
-                    &ctx,
-                    &mic_mono,
-                    Speaker::Me,
-                    mic_segment_start_ms,
-                    elapsed_ms,
-                    &channel,
-                );
+                if let Some(seg) = transcribe_segment(
+                    &ctx, &mic_mono, Speaker::Me, mic_segment_start_ms, elapsed_ms, &channel,
+                ) {
+                    push_segment(seg, &mut all_segments, &shared_segments);
+                }
             }
             mic_raw_buf.clear();
             mic_segment_start_ms = elapsed_ms;
@@ -169,19 +251,35 @@ fn worker_loop(
         if should_transcribe(&system_mono, &mut system_had_speech, &mut system_silence_count, threshold) {
             let elapsed_ms = recording_start.elapsed().as_millis() as u64;
             if system_had_speech {
-                transcribe_segment(
-                    &ctx,
-                    &system_mono,
-                    Speaker::Others,
-                    system_segment_start_ms,
-                    elapsed_ms,
-                    &channel,
-                );
+                if let Some(seg) = transcribe_segment(
+                    &ctx, &system_mono, Speaker::Others, system_segment_start_ms, elapsed_ms, &channel,
+                ) {
+                    push_segment(seg, &mut all_segments, &shared_segments);
+                }
             }
             system_raw_buf.clear();
             system_segment_start_ms = elapsed_ms;
             system_had_speech = false;
             system_silence_count = 0;
+        }
+
+        // Track last speech time for silence timeout
+        if mic_had_speech || system_had_speech {
+            last_speech_time = Instant::now();
+        }
+
+        // Auto-stop if silence exceeds the configured timeout
+        if let Some(timeout_secs) = silence_timeout_seconds {
+            if timeout_secs > 0
+                && last_speech_time.elapsed().as_secs() >= u64::from(timeout_secs)
+            {
+                eprintln!(
+                    "Auto-stopping: no speech for {} seconds",
+                    timeout_secs
+                );
+                auto_stopped.store(true, Ordering::SeqCst);
+                running.store(false, Ordering::SeqCst);
+            }
         }
 
         thread::sleep(std::time::Duration::from_millis(POLL_INTERVAL_MS));
@@ -193,28 +291,24 @@ fn worker_loop(
 
     let mic_mono = pipeline::process_buffer(&mic_raw_buf, mic_sample_rate, mic_channels);
     if !mic_mono.is_empty() && pipeline::is_speech(&mic_mono, threshold) {
-        transcribe_segment(
-            &ctx,
-            &mic_mono,
-            Speaker::Me,
-            mic_segment_start_ms,
-            elapsed_ms,
-            &channel,
-        );
+        if let Some(seg) = transcribe_segment(
+            &ctx, &mic_mono, Speaker::Me, mic_segment_start_ms, elapsed_ms, &channel,
+        ) {
+            push_segment(seg, &mut all_segments, &shared_segments);
+        }
     }
 
     let system_mono =
         pipeline::process_buffer(&system_raw_buf, system_sample_rate, system_channels);
     if !system_mono.is_empty() && pipeline::is_speech(&system_mono, threshold) {
-        transcribe_segment(
-            &ctx,
-            &system_mono,
-            Speaker::Others,
-            system_segment_start_ms,
-            elapsed_ms,
-            &channel,
-        );
+        if let Some(seg) = transcribe_segment(
+            &ctx, &system_mono, Speaker::Others, system_segment_start_ms, elapsed_ms, &channel,
+        ) {
+            push_segment(seg, &mut all_segments, &shared_segments);
+        }
     }
+
+    all_segments
 }
 
 /// Pop all available samples from a ring buffer consumer into the accumulation buffer.
@@ -301,8 +395,8 @@ fn is_non_speech(text: &str) -> bool {
         || lower.chars().all(|c| c == '♪' || c == '♫' || c.is_whitespace())
 }
 
-/// Run Whisper inference on a 16 kHz mono audio segment and send the result
-/// to the frontend.
+/// Run Whisper inference on a 16 kHz mono audio segment, send the result
+/// to the frontend, and return a clone for accumulation.
 fn transcribe_segment(
     ctx: &WhisperContext,
     audio: &[f32],
@@ -310,12 +404,12 @@ fn transcribe_segment(
     start_ms: u64,
     end_ms: u64,
     channel: &Channel<TranscriptSegment>,
-) {
+) -> Option<TranscriptSegment> {
     let mut state = match ctx.create_state() {
         Ok(s) => s,
         Err(e) => {
             eprintln!("Failed to create Whisper state: {}", e);
-            return;
+            return None;
         }
     };
 
@@ -327,7 +421,7 @@ fn transcribe_segment(
 
     if let Err(e) = state.full(params, audio) {
         eprintln!("Whisper inference failed: {}", e);
-        return;
+        return None;
     }
 
     let num_segments = state.full_n_segments();
@@ -346,7 +440,7 @@ fn transcribe_segment(
 
     let text = text_parts.join(" ");
     if text.is_empty() || is_non_speech(&text) {
-        return;
+        return None;
     }
 
     let segment = TranscriptSegment {
@@ -357,7 +451,8 @@ fn transcribe_segment(
         is_final: true,
     };
 
-    channel.send(segment).ok();
+    channel.send(segment.clone()).ok();
+    Some(segment)
 }
 
 #[cfg(test)]
