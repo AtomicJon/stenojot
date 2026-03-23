@@ -33,6 +33,9 @@ export interface PersistedSettings {
   models_dir: string | null;
   output_dir: string | null;
   silence_timeout_seconds: number | null;
+  whisper_model: string;
+  initial_prompt: string | null;
+  max_segment_seconds: number;
 }
 
 /** Result returned by `start_recording`. */

@@ -44,6 +44,12 @@ pub struct AppState {
     pub output_dir: Option<String>,
     /// Auto-stop silence timeout in seconds (None = disabled).
     pub silence_timeout_seconds: Option<u32>,
+    /// Whisper model name (e.g. "base", "small", "medium").
+    pub whisper_model: String,
+    /// Initial prompt to guide Whisper transcription.
+    pub initial_prompt: Option<String>,
+    /// Maximum segment duration in seconds before forced transcription.
+    pub max_segment_seconds: u32,
     /// Timestamp when the current recording started.
     pub recording_start_time: Option<chrono::DateTime<chrono::Local>>,
     /// Whether the recording is currently paused.
@@ -86,6 +92,9 @@ impl AppState {
             config_dir: PathBuf::new(),
             output_dir: None,
             silence_timeout_seconds: Some(300),
+            whisper_model: settings::DEFAULT_WHISPER_MODEL.to_string(),
+            initial_prompt: None,
+            max_segment_seconds: settings::DEFAULT_MAX_SEGMENT_SECONDS,
             recording_start_time: None,
             is_paused: false,
             current_transcript_path: None,
@@ -105,6 +114,9 @@ fn save_current_settings(app_state: &AppState) {
             .map(|p| p.to_string_lossy().to_string()),
         output_dir: app_state.output_dir.clone(),
         silence_timeout_seconds: app_state.silence_timeout_seconds,
+        whisper_model: app_state.whisper_model.clone(),
+        initial_prompt: app_state.initial_prompt.clone(),
+        max_segment_seconds: app_state.max_segment_seconds,
     };
     if let Err(e) = settings::save(&app_state.config_dir, &settings) {
         eprintln!("Failed to save settings: {}", e);
@@ -182,6 +194,42 @@ pub fn set_silence_timeout(seconds: u32, state: State<'_, Mutex<AppState>>) -> R
     Ok(())
 }
 
+/// Set and persist the Whisper model name.
+///
+/// Valid model names: "tiny", "base", "small", "medium", "large".
+/// Quantized variants like "base-q5_1" and "small-q5_1" are also accepted.
+#[tauri::command]
+pub fn set_whisper_model(model: String, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
+    let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    app_state.whisper_model = model;
+    save_current_settings(&app_state);
+    Ok(())
+}
+
+/// Set and persist the initial prompt for Whisper transcription.
+///
+/// The prompt provides context (domain terms, names, jargon) to improve
+/// recognition accuracy. Pass an empty string to clear.
+#[tauri::command]
+pub fn set_initial_prompt(prompt: String, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
+    let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    app_state.initial_prompt = if prompt.is_empty() { None } else { Some(prompt) };
+    save_current_settings(&app_state);
+    Ok(())
+}
+
+/// Set and persist the maximum segment duration in seconds.
+///
+/// Clamped to 1–30 seconds. Larger values reduce Whisper startup overhead
+/// but increase latency before transcription appears.
+#[tauri::command]
+pub fn set_max_segment_seconds(seconds: u32, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
+    let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    app_state.max_segment_seconds = seconds.clamp(1, 30);
+    save_current_settings(&app_state);
+    Ok(())
+}
+
 /// Result returned by `start_recording`.
 #[derive(serde::Serialize)]
 pub struct StartRecordingResult {
@@ -211,9 +259,12 @@ pub fn start_recording(
     }
 
     // Ensure the Whisper model is available before starting
-    let model_name = "base";
+    let model_name = &app_state.whisper_model;
     if !manager::model_exists(model_name) {
-        return Err("Whisper model not downloaded. Call download_model first.".to_string());
+        return Err(format!(
+            "Whisper model '{}' not downloaded. Call download_model first.",
+            model_name
+        ));
     }
     let model_path = manager::get_model_path(model_name);
 
@@ -249,6 +300,8 @@ pub fn start_recording(
         app_state.system_channels,
         Arc::clone(&app_state.vad_threshold),
         app_state.silence_timeout_seconds,
+        app_state.initial_prompt.clone(),
+        app_state.max_segment_seconds,
         on_transcript,
     )?;
 
@@ -432,14 +485,16 @@ pub fn get_vad_threshold(state: State<'_, Mutex<AppState>>) -> Result<f32, Strin
 
 /// Get detailed info about the Whisper model (path, size, download status).
 #[tauri::command]
-pub fn get_model_info() -> Result<ModelInfo, String> {
-    Ok(manager::get_model_info("base"))
+pub fn get_model_info(state: State<'_, Mutex<AppState>>) -> Result<ModelInfo, String> {
+    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    Ok(manager::get_model_info(&app_state.whisper_model))
 }
 
 /// Delete the downloaded Whisper model file.
 #[tauri::command]
-pub fn delete_model() -> Result<(), String> {
-    manager::delete_model("base")
+pub fn delete_model(state: State<'_, Mutex<AppState>>) -> Result<(), String> {
+    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    manager::delete_model(&app_state.whisper_model)
 }
 
 /// Set a custom directory for storing Whisper model files.
@@ -458,13 +513,16 @@ pub fn set_models_dir(path: String, state: State<'_, Mutex<AppState>>) -> Result
     Ok(())
 }
 
-/// Download the Whisper base model from Hugging Face.
+/// Download the currently selected Whisper model from Hugging Face.
 ///
-/// This is a blocking download (~140 MB). Returns the path to the
-/// downloaded model file on success.
+/// This is a blocking download. Returns the path to the downloaded
+/// model file on success.
 #[tauri::command]
-pub fn download_model() -> Result<String, String> {
-    let path = manager::download_model_file("base")?;
+pub fn download_model(state: State<'_, Mutex<AppState>>) -> Result<String, String> {
+    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let model_name = app_state.whisper_model.clone();
+    drop(app_state); // Release lock before blocking download
+    let path = manager::download_model_file(&model_name)?;
     Ok(path.to_string_lossy().to_string())
 }
 

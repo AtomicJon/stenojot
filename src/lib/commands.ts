@@ -170,6 +170,33 @@ export function setSilenceTimeout(seconds: number): Promise<void> {
   return invoke("set_silence_timeout", { seconds });
 }
 
+/**
+ * Set and persist the Whisper model name.
+ * @param model - Model name (e.g. "tiny", "base", "small", "medium")
+ */
+export function setWhisperModel(model: string): Promise<void> {
+  return invoke("set_whisper_model", { model });
+}
+
+/**
+ * Set and persist the initial prompt for Whisper transcription.
+ * Provides context (domain terms, names) to improve accuracy.
+ * Pass an empty string to clear.
+ * @param prompt - Initial prompt text
+ */
+export function setInitialPrompt(prompt: string): Promise<void> {
+  return invoke("set_initial_prompt", { prompt });
+}
+
+/**
+ * Set and persist the maximum segment duration in seconds (1–30).
+ * Larger values reduce overhead but increase latency.
+ * @param seconds - Maximum segment duration
+ */
+export function setMaxSegmentSeconds(seconds: number): Promise<void> {
+  return invoke("set_max_segment_seconds", { seconds });
+}
+
 /** List meetings in the output directory. */
 export function listMeetings(): Promise<MeetingEntry[]> {
   return invoke<MeetingEntry[]>("list_meetings");

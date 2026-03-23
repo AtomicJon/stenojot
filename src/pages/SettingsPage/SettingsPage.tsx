@@ -8,6 +8,9 @@ import {
   setOutputDir,
   setSilenceTimeout,
   getSettings,
+  setWhisperModel,
+  setInitialPrompt,
+  setMaxSegmentSeconds,
 } from "../../lib/commands";
 import { formatFileSize } from "../../lib/format";
 import { useRecording } from "../../hooks/useRecording";
@@ -38,6 +41,11 @@ export function SettingsPage() {
   const [outputDirSaved, setOutputDirSaved] = useState(false);
   const [silenceTimeout, setSilenceTimeoutState] = useState<number>(300);
   const [timeoutSaved, setTimeoutSaved] = useState(false);
+  const [whisperModel, setWhisperModelState] = useState("base");
+  const [initialPrompt, setInitialPromptState] = useState("");
+  const [promptSaved, setPromptSaved] = useState(false);
+  const [maxSegmentSeconds, setMaxSegmentSecondsState] = useState(15);
+  const [segmentSaved, setSegmentSaved] = useState(false);
 
   /** Load model info from the backend. */
   const loadModelInfo = useCallback(async () => {
@@ -57,6 +65,9 @@ export function SettingsPage() {
         const [dir, settings] = await Promise.all([getOutputDir(), getSettings()]);
         setOutputDirState(dir);
         setSilenceTimeoutState(settings.silence_timeout_seconds ?? 0);
+        setWhisperModelState(settings.whisper_model);
+        setInitialPromptState(settings.initial_prompt ?? "");
+        setMaxSegmentSecondsState(settings.max_segment_seconds);
       } catch (err) {
         console.error("Failed to load output settings:", err);
       }
@@ -144,6 +155,40 @@ export function SettingsPage() {
     }
   }, [silenceTimeout]);
 
+  /** Change the Whisper model and reload model info. */
+  const handleModelChange = useCallback(async (model: string) => {
+    setWhisperModelState(model);
+    try {
+      await setWhisperModel(model);
+      await loadModelInfo();
+      await refreshModelStatus();
+    } catch (err) {
+      console.error("Failed to set whisper model:", err);
+    }
+  }, [loadModelInfo, refreshModelStatus]);
+
+  /** Save the initial prompt setting. */
+  const handleSavePrompt = useCallback(async () => {
+    try {
+      await setInitialPrompt(initialPrompt);
+      setPromptSaved(true);
+      setTimeout(() => setPromptSaved(false), 2000);
+    } catch (err) {
+      console.error("Failed to set initial prompt:", err);
+    }
+  }, [initialPrompt]);
+
+  /** Save the max segment seconds setting. */
+  const handleSaveMaxSegment = useCallback(async () => {
+    try {
+      await setMaxSegmentSeconds(maxSegmentSeconds);
+      setSegmentSaved(true);
+      setTimeout(() => setSegmentSaved(false), 2000);
+    } catch (err) {
+      console.error("Failed to set max segment seconds:", err);
+    }
+  }, [maxSegmentSeconds]);
+
   const micOptions = micDevices.map((d) => ({
     value: d.id,
     label: d.name + (d.is_default ? " (Default)" : ""),
@@ -199,6 +244,21 @@ export function SettingsPage() {
 
       {/* Model Management */}
       <Panel title="Transcription Model">
+        <div className={s.fieldGroup}>
+          <Select
+            label="Model"
+            value={whisperModel}
+            options={[
+              { value: "tiny", label: "Tiny (~75 MB — fastest, least accurate)" },
+              { value: "base", label: "Base (~142 MB — fast, good accuracy)" },
+              { value: "small", label: "Small (~466 MB — balanced)" },
+              { value: "medium", label: "Medium (~1.5 GB — slower, high accuracy)" },
+            ]}
+            onChange={handleModelChange}
+            disabled={isRecording}
+          />
+        </div>
+
         <div className={s.infoGrid}>
           <span className={s.infoLabel}>Model</span>
           <span className={s.infoValue}>{modelInfo.name}</span>
@@ -319,6 +379,59 @@ export function SettingsPage() {
           <span className={s.inputSuffix}>seconds</span>
           <Button onClick={handleSaveSilenceTimeout}>
             {timeoutSaved ? "Saved" : "Save"}
+          </Button>
+        </div>
+      </Panel>
+
+      {/* Initial Prompt */}
+      <Panel title="Initial Prompt">
+        <p className={s.sectionDesc}>
+          Provide domain-specific terms, names, or jargon to improve transcription
+          accuracy. Leave empty for default behavior.
+        </p>
+
+        <div className={s.pathInputRow}>
+          <input
+            type="text"
+            className={s.pathInput}
+            value={initialPrompt}
+            onChange={(e) => {
+              setInitialPromptState(e.target.value);
+              setPromptSaved(false);
+            }}
+            placeholder="e.g. Kubernetes, PostgreSQL, EchoNotes, Jon"
+          />
+          <Button onClick={handleSavePrompt}>
+            {promptSaved ? "Saved" : "Save"}
+          </Button>
+        </div>
+      </Panel>
+
+      {/* Max Segment Duration */}
+      <Panel title="Max Segment Duration">
+        <p className={s.sectionDesc}>
+          Maximum audio duration before forcing transcription. Larger values reduce
+          overhead but increase latency (1–30 seconds).
+        </p>
+
+        <div className={s.pathInputRow}>
+          <input
+            type="number"
+            className={s.numberInput}
+            value={maxSegmentSeconds}
+            onChange={(e) => {
+              setMaxSegmentSecondsState(
+                Math.min(30, Math.max(1, parseInt(e.target.value) || 1))
+              );
+              setSegmentSaved(false);
+            }}
+            min={1}
+            max={30}
+            step={1}
+          />
+          <span className={s.inputSuffix}>seconds</span>
+          <Button onClick={handleSaveMaxSegment}>
+            {segmentSaved ? "Saved" : "Save"}
           </Button>
         </div>
       </Panel>

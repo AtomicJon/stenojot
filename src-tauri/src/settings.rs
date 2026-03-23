@@ -28,7 +28,19 @@ pub struct Settings {
     pub output_dir: Option<String>,
     /// Auto-stop after this many seconds of silence (None = disabled).
     pub silence_timeout_seconds: Option<u32>,
+    /// Whisper model name (e.g. "base", "small", "medium", "tiny").
+    pub whisper_model: String,
+    /// Initial prompt to guide Whisper transcription (domain terms, names, etc.).
+    pub initial_prompt: Option<String>,
+    /// Maximum segment duration in seconds before forced transcription (1–30).
+    pub max_segment_seconds: u32,
 }
+
+/// Default Whisper model name.
+pub const DEFAULT_WHISPER_MODEL: &str = "base";
+
+/// Default maximum segment duration in seconds.
+pub const DEFAULT_MAX_SEGMENT_SECONDS: u32 = 15;
 
 impl Default for Settings {
     fn default() -> Self {
@@ -40,6 +52,9 @@ impl Default for Settings {
             models_dir: None,
             output_dir: None,
             silence_timeout_seconds: Some(300),
+            whisper_model: DEFAULT_WHISPER_MODEL.to_string(),
+            initial_prompt: None,
+            max_segment_seconds: DEFAULT_MAX_SEGMENT_SECONDS,
         }
     }
 }
@@ -117,6 +132,9 @@ mod tests {
         assert!(settings.mic_device_id.is_none());
         assert!(settings.system_device_id.is_none());
         assert!(settings.models_dir.is_none());
+        assert_eq!(settings.whisper_model, DEFAULT_WHISPER_MODEL);
+        assert!(settings.initial_prompt.is_none());
+        assert_eq!(settings.max_segment_seconds, DEFAULT_MAX_SEGMENT_SECONDS);
     }
 
     #[test]
@@ -131,6 +149,9 @@ mod tests {
             models_dir: Some("/custom/models".to_string()),
             output_dir: Some("/custom/output".to_string()),
             silence_timeout_seconds: Some(120),
+            whisper_model: "small".to_string(),
+            initial_prompt: Some("Kubernetes, PostgreSQL".to_string()),
+            max_segment_seconds: 20,
         };
 
         // Act
@@ -143,6 +164,9 @@ mod tests {
         assert!((loaded.mic_gain - 2.5).abs() < f32::EPSILON);
         assert!((loaded.vad_threshold - 0.01).abs() < f32::EPSILON);
         assert_eq!(loaded.models_dir.as_deref(), Some("/custom/models"));
+        assert_eq!(loaded.whisper_model, "small");
+        assert_eq!(loaded.initial_prompt.as_deref(), Some("Kubernetes, PostgreSQL"));
+        assert_eq!(loaded.max_segment_seconds, 20);
     }
 
     #[test]
