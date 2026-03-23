@@ -12,6 +12,15 @@ use std::path::{Path, PathBuf};
 use crate::audio::types::TranscriptSegment;
 use crate::llm::provider::LlmError;
 
+/// Subdirectory name for transcript files within the output directory.
+pub const TRANSCRIPTS_SUBDIR: &str = "transcripts";
+
+/// Subdirectory name for summary files within the output directory.
+pub const SUMMARIES_SUBDIR: &str = "summaries";
+
+/// Filename suffix for transcript files.
+pub const TRANSCRIPT_SUFFIX: &str = " - Transcript.md";
+
 /// A single meeting entry parsed from the output directory.
 #[derive(Debug, Clone, Serialize)]
 pub struct MeetingEntry {
@@ -47,6 +56,19 @@ pub fn sanitize_filename(name: &str) -> String {
         .to_string()
 }
 
+/// Percent-encode spaces in a filename for use in Markdown links.
+fn encode_filename_for_link(filename: &str) -> String {
+    filename.replace(' ', "%20")
+}
+
+/// Generate the summary filename from the meeting start time and name.
+///
+/// Format: `YYYY-MM-DD HH.MM <Meeting Name>.md`
+pub fn summary_filename(start_time: &DateTime<Local>, meeting_name: &str) -> String {
+    let safe_name = sanitize_filename(meeting_name);
+    format!("{} {}.md", start_time.format("%Y-%m-%d %H.%M"), safe_name)
+}
+
 /// Format milliseconds as `[HH:MM:SS]` for transcript entries.
 pub fn format_timestamp_hhmmss(ms: u64) -> String {
     let total_seconds = ms / 1000;
@@ -57,6 +79,9 @@ pub fn format_timestamp_hhmmss(ms: u64) -> String {
 }
 
 /// Format transcript segments into a Markdown string.
+///
+/// Includes a relative link to the corresponding summary file in the
+/// `summaries/` sibling directory.
 pub fn format_transcript(
     segments: &[TranscriptSegment],
     meeting_name: &str,
@@ -65,13 +90,20 @@ pub fn format_transcript(
 ) -> String {
     let mut md = String::new();
 
+    let sum_filename = summary_filename(&start_time, meeting_name);
+    let sum_link = encode_filename_for_link(&sum_filename);
+
     md.push_str(&format!("# {} — Full Transcript\n\n", meeting_name));
     md.push_str(&format!(
         "**Date:** {}–{}\n",
         start_time.format("%Y-%m-%d %H:%M"),
         end_time.format("%H:%M")
     ));
-    md.push_str("**Participants:** Me, Others\n\n");
+    md.push_str("**Participants:** Me, Others\n");
+    md.push_str(&format!(
+        "**Summary:** [View Summary](../summaries/{})\n\n",
+        sum_link
+    ));
     md.push_str("---\n\n");
 
     for seg in segments {
@@ -89,18 +121,19 @@ pub fn format_transcript(
 /// Generate the transcript filename from the meeting start time and name.
 ///
 /// Format: `YYYY-MM-DD HH.MM <Meeting Name> - Transcript.md`
-fn transcript_filename(start_time: &DateTime<Local>, meeting_name: &str) -> String {
+pub fn transcript_filename(start_time: &DateTime<Local>, meeting_name: &str) -> String {
     let safe_name = sanitize_filename(meeting_name);
     format!(
-        "{} {} - Transcript.md",
+        "{} {}{}",
         start_time.format("%Y-%m-%d %H.%M"),
-        safe_name
+        safe_name,
+        TRANSCRIPT_SUFFIX
     )
 }
 
-/// Write a transcript Markdown file to the output directory.
+/// Write a transcript Markdown file to the `transcripts/` subdirectory.
 ///
-/// Creates the output directory if it does not exist. Uses a temporary file
+/// Creates the subdirectory if it does not exist. Uses a temporary file
 /// and rename for atomicity.
 pub fn write_transcript(
     output_dir: &Path,
@@ -109,12 +142,13 @@ pub fn write_transcript(
     start_time: DateTime<Local>,
     end_time: DateTime<Local>,
 ) -> Result<PathBuf, String> {
-    fs::create_dir_all(output_dir)
-        .map_err(|e| format!("Failed to create output directory: {}", e))?;
+    let transcripts_dir = output_dir.join(TRANSCRIPTS_SUBDIR);
+    fs::create_dir_all(&transcripts_dir)
+        .map_err(|e| format!("Failed to create transcripts directory: {}", e))?;
 
     let filename = transcript_filename(&start_time, meeting_name);
-    let path = output_dir.join(&filename);
-    let tmp_path = output_dir.join(format!("{}.tmp", filename));
+    let path = transcripts_dir.join(&filename);
+    let tmp_path = transcripts_dir.join(format!("{}.tmp", filename));
 
     let content = format_transcript(segments, meeting_name, start_time, end_time);
 
@@ -152,28 +186,41 @@ pub fn update_transcript(
 
 /// Compute the summary file path for a given transcript file path.
 ///
-/// Transforms `YYYY-MM-DD HH.MM Name - Transcript.md` → `YYYY-MM-DD HH.MM Name.md`.
+/// Navigates from the `transcripts/` subdirectory to the sibling `summaries/`
+/// subdirectory. Transforms `transcripts/YYYY-MM-DD HH.MM Name - Transcript.md`
+/// → `summaries/YYYY-MM-DD HH.MM Name.md`.
 pub fn summary_path_for_transcript(transcript_path: &Path) -> PathBuf {
     let filename = transcript_path
         .file_name()
         .unwrap_or_default()
         .to_string_lossy();
 
-    let summary_filename = if let Some(stem) = filename.strip_suffix(" - Transcript.md") {
+    let sum_filename = if let Some(stem) = filename.strip_suffix(TRANSCRIPT_SUFFIX) {
         format!("{}.md", stem)
     } else {
         // Fallback: just replace extension
         format!("{}.summary.md", filename.trim_end_matches(".md"))
     };
 
+    // Navigate from transcripts/ up to the output root, then into summaries/
     transcript_path
         .parent()
+        .and_then(|p| p.parent())
         .unwrap_or(Path::new("."))
-        .join(summary_filename)
+        .join(SUMMARIES_SUBDIR)
+        .join(sum_filename)
 }
 
 /// Write a summary Markdown file atomically (temp file + rename).
+///
+/// Creates the parent directory (typically `summaries/`) if it does not exist.
 pub fn write_summary(path: &Path, content: &str) -> Result<(), LlmError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| {
+            LlmError::Network(format!("Failed to create summaries directory: {}", e))
+        })?;
+    }
+
     let tmp_path = path.with_extension("md.tmp");
 
     fs::write(&tmp_path, content)
@@ -188,22 +235,20 @@ pub fn write_summary(path: &Path, content: &str) -> Result<(), LlmError> {
 
 /// Rename meeting files when the LLM generates a better title.
 ///
-/// Renames the transcript file (and summary file if it exists) from the
-/// old meeting name to the new one. Returns the new transcript path.
+/// Renames the transcript file in `transcripts/` (and summary file in
+/// `summaries/` if it exists) from the old meeting name to the new one.
+/// Also updates the summary cross-link inside the transcript content.
+/// Returns the new transcript path.
 pub fn rename_meeting_files(
     transcript_path: &Path,
     output_dir: &Path,
     start_time: &DateTime<Local>,
-    _old_name: &str,
+    old_name: &str,
     new_name: &str,
 ) -> Result<PathBuf, String> {
-    let safe_name = sanitize_filename(new_name);
-    let new_transcript_filename = format!(
-        "{} {} - Transcript.md",
-        start_time.format("%Y-%m-%d %H.%M"),
-        safe_name
-    );
-    let new_transcript_path = output_dir.join(&new_transcript_filename);
+    let new_transcript_fname = transcript_filename(start_time, new_name);
+    let transcripts_dir = output_dir.join(TRANSCRIPTS_SUBDIR);
+    let new_transcript_path = transcripts_dir.join(&new_transcript_fname);
 
     // Don't rename if the path hasn't changed
     if transcript_path == new_transcript_path {
@@ -221,6 +266,30 @@ pub fn rename_meeting_files(
     fs::rename(transcript_path, &new_transcript_path)
         .map_err(|e| format!("Failed to rename transcript: {}", e))?;
 
+    // Also rename summary file if it exists
+    let old_summary = summary_path_for_transcript(transcript_path);
+    if old_summary.exists() {
+        let new_summary = summary_path_for_transcript(&new_transcript_path);
+        if !new_summary.exists() {
+            fs::rename(&old_summary, &new_summary)
+                .map_err(|e| format!("Failed to rename summary: {}", e))?;
+        }
+    }
+
+    // Update the summary cross-link inside the transcript content
+    let old_sum_filename = summary_filename(start_time, old_name);
+    let new_sum_filename = summary_filename(start_time, new_name);
+    let old_link = encode_filename_for_link(&old_sum_filename);
+    let new_link = encode_filename_for_link(&new_sum_filename);
+    if old_link != new_link {
+        if let Ok(content) = fs::read_to_string(&new_transcript_path) {
+            let updated = content.replace(&old_link, &new_link);
+            if updated != content {
+                let _ = fs::write(&new_transcript_path, &updated);
+            }
+        }
+    }
+
     eprintln!(
         "Renamed transcript: {} → {}",
         transcript_path.display(),
@@ -230,21 +299,29 @@ pub fn rename_meeting_files(
     Ok(new_transcript_path)
 }
 
-/// List meetings in the output directory by parsing transcript filenames.
+/// List meetings by scanning the `transcripts/` subdirectory.
 ///
 /// Returns entries sorted newest-first. Only files matching the
 /// `YYYY-MM-DD HH.MM <Name> - Transcript.md` pattern are included.
+/// Summary existence is checked in the sibling `summaries/` subdirectory.
 pub fn list_meetings_in_dir(output_dir: &Path) -> Vec<MeetingEntry> {
-    let entries = match fs::read_dir(output_dir) {
+    let transcripts_dir = output_dir.join(TRANSCRIPTS_SUBDIR);
+    let entries = match fs::read_dir(&transcripts_dir) {
         Ok(e) => e,
         Err(_) => return Vec::new(),
     };
+
+    let summaries_dir = output_dir.join(SUMMARIES_SUBDIR);
 
     let mut meetings: Vec<MeetingEntry> = entries
         .filter_map(|entry| {
             let entry = entry.ok()?;
             let filename = entry.file_name().to_string_lossy().to_string();
-            parse_transcript_filename(&filename, entry.path().to_string_lossy().as_ref())
+            parse_transcript_filename(
+                &filename,
+                entry.path().to_string_lossy().as_ref(),
+                &summaries_dir,
+            )
         })
         .collect();
 
@@ -260,9 +337,14 @@ pub fn list_meetings_in_dir(output_dir: &Path) -> Vec<MeetingEntry> {
 
 /// Parse a transcript filename into a `MeetingEntry`.
 ///
-/// Expected format: `YYYY-MM-DD HH.MM <Name> - Transcript.md`
-fn parse_transcript_filename(filename: &str, full_path: &str) -> Option<MeetingEntry> {
-    let stem = filename.strip_suffix(" - Transcript.md")?;
+/// Expected format: `YYYY-MM-DD HH.MM <Name> - Transcript.md`.
+/// Summary existence is checked in `summaries_dir`.
+fn parse_transcript_filename(
+    filename: &str,
+    full_path: &str,
+    summaries_dir: &Path,
+) -> Option<MeetingEntry> {
+    let stem = filename.strip_suffix(TRANSCRIPT_SUFFIX)?;
 
     // Need at least "YYYY-MM-DD HH.MM X" = 17+ chars
     if stem.len() < 17 {
@@ -288,12 +370,9 @@ fn parse_transcript_filename(filename: &str, full_path: &str) -> Option<MeetingE
         return None;
     }
 
-    // Check for corresponding summary file
-    let summary_filename = format!("{}.md", stem);
-    let summary_path = PathBuf::from(full_path)
-        .parent()
-        .map(|p| p.join(&summary_filename))
-        .unwrap_or_default();
+    // Check for corresponding summary file in summaries/ directory
+    let sum_filename = format!("{}.md", stem);
+    let summary_path = summaries_dir.join(&sum_filename);
     let has_summary = summary_path.exists();
 
     let size_bytes = fs::metadata(full_path).map(|m| m.len()).unwrap_or(0);
@@ -401,6 +480,7 @@ mod tests {
         // Assert
         assert!(result.contains("# Test Meeting — Full Transcript"));
         assert!(result.contains("**Participants:** Me, Others"));
+        assert!(result.contains("**Summary:** [View Summary](../summaries/"));
         assert!(result.contains("---"));
     }
 
@@ -432,6 +512,7 @@ mod tests {
         // Assert
         assert!(result.contains("[00:00:12] **Me:** Hello everyone."));
         assert!(result.contains("[00:00:16] **Others:** Hi there."));
+        assert!(result.contains("**Summary:** [View Summary](../summaries/"));
     }
 
     #[test]
@@ -456,6 +537,8 @@ mod tests {
         let content = fs::read_to_string(&path).unwrap();
         assert!(content.contains("Test segment."));
         assert!(path.to_string_lossy().ends_with("- Transcript.md"));
+        // File should be inside the transcripts/ subdirectory
+        assert!(path.parent().unwrap().ends_with(TRANSCRIPTS_SUBDIR));
     }
 
     #[test]
@@ -478,16 +561,21 @@ mod tests {
 
         // Assert
         assert!(result.is_ok());
-        assert!(nested.exists());
+        assert!(nested.join(TRANSCRIPTS_SUBDIR).exists());
     }
 
     #[test]
     fn parse_transcript_filename_valid() {
         // Arrange
         let filename = "2026-03-22 14.00 Meeting at 14-00 - Transcript.md";
+        let summaries_dir = Path::new("/output/summaries");
 
         // Act
-        let entry = parse_transcript_filename(filename, "/output/2026-03-22 14.00 Meeting at 14-00 - Transcript.md");
+        let entry = parse_transcript_filename(
+            filename,
+            "/output/transcripts/2026-03-22 14.00 Meeting at 14-00 - Transcript.md",
+            summaries_dir,
+        );
 
         // Assert
         let entry = entry.unwrap();
@@ -500,9 +588,10 @@ mod tests {
     fn parse_transcript_filename_rejects_non_transcript() {
         // Arrange
         let filename = "2026-03-22 14.00 Meeting at 14-00.md";
+        let summaries_dir = Path::new("/output/summaries");
 
         // Act
-        let entry = parse_transcript_filename(filename, "/output/some.md");
+        let entry = parse_transcript_filename(filename, "/output/some.md", summaries_dir);
 
         // Assert
         assert!(entry.is_none());
@@ -512,9 +601,10 @@ mod tests {
     fn parse_transcript_filename_rejects_malformed() {
         // Arrange
         let filename = "random notes.md";
+        let summaries_dir = Path::new("/output/summaries");
 
         // Act
-        let entry = parse_transcript_filename(filename, "/output/random.md");
+        let entry = parse_transcript_filename(filename, "/output/random.md", summaries_dir);
 
         // Assert
         assert!(entry.is_none());
@@ -536,18 +626,20 @@ mod tests {
     fn list_meetings_in_dir_finds_transcripts() {
         // Arrange
         let tmp = tempfile::tempdir().unwrap();
+        let transcripts_dir = tmp.path().join(TRANSCRIPTS_SUBDIR);
+        fs::create_dir_all(&transcripts_dir).unwrap();
         fs::write(
-            tmp.path().join("2026-03-22 14.00 Standup - Transcript.md"),
+            transcripts_dir.join("2026-03-22 14.00 Standup - Transcript.md"),
             "# content",
         )
         .unwrap();
         fs::write(
-            tmp.path().join("2026-03-22 15.30 Planning - Transcript.md"),
+            transcripts_dir.join("2026-03-22 15.30 Planning - Transcript.md"),
             "# content",
         )
         .unwrap();
         // Non-matching file should be ignored
-        fs::write(tmp.path().join("notes.txt"), "hello").unwrap();
+        fs::write(transcripts_dir.join("notes.txt"), "hello").unwrap();
 
         // Act
         let meetings = list_meetings_in_dir(tmp.path());
@@ -614,23 +706,25 @@ mod tests {
 
     #[test]
     fn summary_path_for_transcript_standard() {
-        // Arrange
-        let transcript = PathBuf::from("/output/2026-03-22 14.00 Sprint Planning - Transcript.md");
+        // Arrange — transcript lives in transcripts/ subdir
+        let transcript = PathBuf::from(
+            "/output/transcripts/2026-03-22 14.00 Sprint Planning - Transcript.md",
+        );
 
         // Act
         let summary = summary_path_for_transcript(&transcript);
 
-        // Assert
+        // Assert — summary goes to sibling summaries/ subdir
         assert_eq!(
             summary,
-            PathBuf::from("/output/2026-03-22 14.00 Sprint Planning.md")
+            PathBuf::from("/output/summaries/2026-03-22 14.00 Sprint Planning.md")
         );
     }
 
     #[test]
     fn summary_path_for_transcript_non_standard_filename() {
         // Arrange
-        let transcript = PathBuf::from("/output/random-notes.md");
+        let transcript = PathBuf::from("/output/transcripts/random-notes.md");
 
         // Act
         let summary = summary_path_for_transcript(&transcript);
@@ -638,15 +732,16 @@ mod tests {
         // Assert
         assert_eq!(
             summary,
-            PathBuf::from("/output/random-notes.summary.md")
+            PathBuf::from("/output/summaries/random-notes.summary.md")
         );
     }
 
     #[test]
-    fn write_summary_creates_file() {
-        // Arrange
+    fn write_summary_creates_file_and_directory() {
+        // Arrange — path inside a summaries/ subdir that doesn't exist yet
         let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("2026-03-22 14.00 Test.md");
+        let summaries_dir = tmp.path().join(SUMMARIES_SUBDIR);
+        let path = summaries_dir.join("2026-03-22 14.00 Test.md");
         let content = "# Test\n\n## Key Points\n- Item 1\n";
 
         // Act
@@ -655,6 +750,7 @@ mod tests {
         // Assert
         assert!(result.is_ok());
         assert!(path.exists());
+        assert!(summaries_dir.exists());
         let written = fs::read_to_string(&path).unwrap();
         assert_eq!(written, content);
     }
@@ -681,6 +777,10 @@ mod tests {
         assert!(!old_path.exists());
         assert!(new_path.exists());
         assert!(new_path.to_string_lossy().contains("Sprint Planning"));
+        // Verify summary link was updated in transcript content
+        let content = fs::read_to_string(&new_path).unwrap();
+        assert!(content.contains("Sprint%20Planning"));
+        assert!(!content.contains("Meeting%20at%2014-00"));
     }
 
     #[test]
@@ -699,13 +799,46 @@ mod tests {
     }
 
     #[test]
-    fn list_meetings_detects_summary() {
+    fn rename_meeting_files_also_renames_summary() {
         // Arrange
         let tmp = tempfile::tempdir().unwrap();
+        let start = chrono::Local::now();
+        let transcript_path =
+            write_transcript(tmp.path(), &[], "Meeting at 14-00", start, start).unwrap();
+        let old_summary_path = summary_path_for_transcript(&transcript_path);
+        fs::create_dir_all(old_summary_path.parent().unwrap()).unwrap();
+        fs::write(&old_summary_path, "# summary").unwrap();
+        assert!(old_summary_path.exists());
+
+        // Act
+        let new_transcript = rename_meeting_files(
+            &transcript_path,
+            tmp.path(),
+            &start,
+            "Meeting at 14-00",
+            "Sprint Planning",
+        )
+        .unwrap();
+
+        // Assert
+        let new_summary_path = summary_path_for_transcript(&new_transcript);
+        assert!(new_summary_path.exists());
+        assert!(!old_summary_path.exists());
+    }
+
+    #[test]
+    fn list_meetings_detects_summary() {
+        // Arrange — transcript in transcripts/, summary in summaries/
+        let tmp = tempfile::tempdir().unwrap();
+        let transcripts_dir = tmp.path().join(TRANSCRIPTS_SUBDIR);
+        let summaries_dir = tmp.path().join(SUMMARIES_SUBDIR);
+        fs::create_dir_all(&transcripts_dir).unwrap();
+        fs::create_dir_all(&summaries_dir).unwrap();
+
         let transcript_name = "2026-03-22 14.00 Standup - Transcript.md";
         let summary_name = "2026-03-22 14.00 Standup.md";
-        fs::write(tmp.path().join(transcript_name), "# content").unwrap();
-        fs::write(tmp.path().join(summary_name), "# summary").unwrap();
+        fs::write(transcripts_dir.join(transcript_name), "# content").unwrap();
+        fs::write(summaries_dir.join(summary_name), "# summary").unwrap();
 
         // Act
         let meetings = list_meetings_in_dir(tmp.path());
@@ -714,5 +847,31 @@ mod tests {
         assert_eq!(meetings.len(), 1);
         assert!(meetings[0].has_summary);
         assert!(!meetings[0].summary_path.is_empty());
+    }
+
+    #[test]
+    fn summary_filename_generates_correct_name() {
+        // Arrange
+        let start = chrono::Local::now();
+        let expected_prefix = start.format("%Y-%m-%d %H.%M").to_string();
+
+        // Act
+        let result = summary_filename(&start, "Sprint Planning");
+
+        // Assert
+        assert_eq!(result, format!("{} Sprint Planning.md", expected_prefix));
+    }
+
+    #[test]
+    fn encode_filename_for_link_encodes_spaces() {
+        // Arrange
+        let filename = "2026-03-22 14.00 Sprint Planning.md";
+
+        // Act
+        let result = encode_filename_for_link(filename);
+
+        // Assert
+        assert_eq!(result, "2026-03-22%2014.00%20Sprint%20Planning.md");
+        assert!(!result.contains(' '));
     }
 }

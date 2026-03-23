@@ -800,7 +800,7 @@ pub fn generate_summary(
         .to_string_lossy()
         .to_string();
     let meeting_name = filename
-        .strip_suffix(" - Transcript.md")
+        .strip_suffix(markdown::TRANSCRIPT_SUFFIX)
         .and_then(|stem| stem.get(17..))
         .map(|n| n.trim().to_string())
         .unwrap_or_else(|| "Meeting".to_string());

@@ -180,17 +180,24 @@ pub fn chunk_transcript(text: &str, max_chars: usize) -> Vec<&str> {
 }
 
 /// Format the summary Markdown content.
+///
+/// Includes a relative link to the corresponding transcript file in the
+/// `transcripts/` sibling directory.
 pub fn format_summary(
     title: &str,
     start_time: DateTime<Local>,
     end_time: DateTime<Local>,
     summary_body: &str,
 ) -> String {
+    let tx_filename = markdown::transcript_filename(&start_time, title);
+    let encoded_filename = tx_filename.replace(' ', "%20");
+
     format!(
-        "# {}\n\n**Date:** {}–{}\n\n{}\n",
+        "# {}\n\n**Date:** {}–{}\n**Transcript:** [View Transcript](../transcripts/{})\n\n{}\n",
         title,
         start_time.format("%Y-%m-%d %H:%M"),
         end_time.format("%H:%M"),
+        encoded_filename,
         summary_body.trim()
     )
 }
@@ -280,6 +287,8 @@ mod tests {
         // Assert
         assert!(result.starts_with("# Sprint Planning\n"));
         assert!(result.contains("**Date:**"));
+        assert!(result.contains("**Transcript:** [View Transcript](../transcripts/"));
+        assert!(result.contains("Sprint%20Planning"));
         assert!(result.contains("## Key Points"));
         assert!(result.contains("## Action Items"));
     }
@@ -297,5 +306,19 @@ mod tests {
         // Assert
         // Should not have double blank lines before Key Points
         assert!(!result.contains("\n\n\n"));
+    }
+
+    #[test]
+    fn format_summary_includes_transcript_link() {
+        // Arrange
+        let start = chrono::Local::now();
+        let end = start;
+
+        // Act
+        let result = format_summary("My Meeting", start, end, "Summary body");
+
+        // Assert
+        assert!(result.contains("../transcripts/"));
+        assert!(result.contains("-%20Transcript.md"));
     }
 }
