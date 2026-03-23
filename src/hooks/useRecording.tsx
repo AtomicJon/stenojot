@@ -25,7 +25,11 @@ import {
   getVadThreshold,
   setVadThreshold as setVadThresholdCmd,
 } from "../lib/commands";
+import { listen } from "@tauri-apps/api/event";
 import type { AudioDevice, AudioLevels, TranscriptSegment } from "../types";
+
+/** Status of background summary generation after recording stops. */
+export type SummaryStatus = "idle" | "generating" | "complete" | "error";
 
 /** How often to auto-save the transcript during recording (ms). */
 const AUTO_SAVE_INTERVAL_MS = 30_000;
@@ -81,6 +85,10 @@ export interface RecordingState {
   lastTranscriptPath: string | null;
   /** Re-check model download status. */
   refreshModelStatus: () => Promise<void>;
+  /** Status of background summary generation. */
+  summaryStatus: SummaryStatus;
+  /** Error message from the last failed summary generation, if any. */
+  summaryError: string | null;
 }
 
 const RecordingContext = createContext<RecordingState | null>(null);
@@ -118,6 +126,8 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
   const [vadThresholdValue, setVadThresholdValue] = useState(0.005);
   const [lastTranscriptPath, setLastTranscriptPath] = useState<string | null>(null);
   const [currentTranscriptPath, setCurrentTranscriptPath] = useState<string | null>(null);
+  const [summaryStatus, setSummaryStatus] = useState<SummaryStatus>("idle");
+  const [summaryError, setSummaryError] = useState<string | null>(null);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const levelPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -191,6 +201,25 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
     };
   }, []);
 
+  // Listen for summary generation events
+  useEffect(() => {
+    const unlistenGenerating = listen("summary-generating", () => {
+      setSummaryStatus("generating");
+    });
+    const unlistenGenerated = listen("summary-generated", () => {
+      setSummaryStatus("complete");
+    });
+    const unlistenError = listen<string>("summary-error", (event) => {
+      setSummaryStatus("error");
+      setSummaryError(event.payload);
+    });
+    return () => {
+      unlistenGenerating.then((u) => u());
+      unlistenGenerated.then((u) => u());
+      unlistenError.then((u) => u());
+    };
+  }, []);
+
   const refreshModelStatus = useCallback(async () => {
     try {
       const info = await getModelInfo();
@@ -203,6 +232,8 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
   const handleStart = useCallback(async () => {
     try {
       setSegments([]);
+      setSummaryStatus("idle");
+      setSummaryError(null);
       const result = await startRecording(micDeviceId, systemDeviceId, (segment) => {
         setSegments((prev) => [...prev, segment]);
       });
@@ -354,6 +385,8 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
     currentTranscriptPath,
     lastTranscriptPath,
     refreshModelStatus,
+    summaryStatus,
+    summaryError,
   };
 
   return (

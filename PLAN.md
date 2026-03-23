@@ -60,8 +60,8 @@ Example output:
 7. ✅ Full transcript saved to Markdown file (timestamped, speaker-labeled, created up-front, saved periodically)
 
 ### Tier 2 — Usable Product
-8. Post-meeting AI summary generation via LLM (key points + action items, ignoring small talk)
-9. Summary saved to Markdown file alongside transcript
+8. ✅ Post-meeting AI summary generation via LLM (key points + action items, ignoring small talk)
+9. ✅ Summary saved to Markdown file alongside transcript
 10. Notepad editor for user notes during meetings
 11. ✅ Meeting list/browser view (reads from output directory, live refresh)
 12. ✅ Configurable output directory (for Obsidian vault targeting)
@@ -379,12 +379,24 @@ tempfile = "3"             # Isolated temp directories for file system tests
 ### Phase 4: AI Summary & Notepad
 **Complexity: Medium | Focus: The "magic" feature**
 
-- [ ] **4.1** Post-meeting LLM call: generate `summary.md` from transcript (key points + action items, ignore small talk)
-- [ ] **4.2** LLM integration (local via Ollama, or cloud via OpenAI/Anthropic API)
+- [x] **4.1** Post-meeting LLM call: generate `summary.md` from transcript (key points + action items, ignore small talk)
+- [x] **4.2** LLM integration (local via Ollama, or cloud via OpenAI/Anthropic API)
 - [ ] **4.3** Rich text notepad editor for user notes during meetings (TipTap)
 - [ ] **4.4** Save user notes as `notes.md` alongside transcript and summary
 - [ ] **4.5** Note template system (shapes the AI summary structure)
-- [ ] **4.6** Meeting name detection from window titles / LLM-generated titles
+- [x] **4.6** Meeting name detection from window titles / LLM-generated titles
+
+**Implementation notes:**
+- New `src-tauri/src/llm/` module with trait-based provider abstraction (`LlmClient` trait). Three implementations: `OllamaClient` (POST /api/chat), `AnthropicClient` (Messages API), `OpenAiClient` (Chat Completions API). All use `reqwest::blocking` on a background `std::thread`.
+- Provider defaults: Ollama → `llama3.1`, Anthropic → `claude-sonnet-4-20250514`, OpenAI → `gpt-4o`. Configurable via Settings → AI Summary panel.
+- Summary generation runs in the background after `stop_recording` returns. Emits `summary-generating`, `summary-generated`, and `summary-error` Tauri events. Can also be triggered manually from the Meetings page.
+- Chunked summarization for long transcripts: splits at speaker turn boundaries (~30K chars per chunk). First chunk uses standard summary prompt; subsequent chunks use iterative refinement prompt that merges running summary with new content.
+- LLM-generated meeting titles: first ~2000 chars of transcript are sent to the LLM for title generation. If the title differs from the fallback ("Meeting at HH-MM"), both transcript and summary files are renamed.
+- Settings stored in existing `settings.json` with `#[serde(default)]` for forward compatibility: `llm_provider`, `llm_model`, `llm_api_key`, `llm_base_url`, `auto_summary`.
+- MeetingsPage shows Summary/Transcript tab toggle when a summary exists, and a "Generate Summary" button when it doesn't. Summary badge shown on meeting cards.
+- `useRecording` hook tracks `summaryStatus` ("idle" | "generating" | "complete" | "error") and `summaryError` message via Tauri events.
+- Toast notification system (`ToastProvider`/`useToast`) shows success/error messages for summary generation. Errors include the backend error message (e.g., model not found, API key invalid) and display for 10 seconds.
+- Layout uses a two-pattern page system: **fixed pages** (RecordingPage, MeetingsPage detail) use a flex column that fills the viewport — transcript panels get `flex: 1; overflow-y: auto` to scroll internally while controls stay fixed. **Scroll pages** (SettingsPage, MeetingsPage list) use a full-width `overflow-y: auto` wrapper so the scrollbar appears at the window edge, not constrained to the centered content column.
 
 ### Phase 5: Platform Expansion & Polish
 **Complexity: High | Focus: Cross-platform + advanced features**
@@ -405,8 +417,8 @@ tempfile = "3"             # Isolated temp directories for file system tests
 2. **Concurrent transcription** — ~~Transcribe mic and system audio as separate Whisper instances, or mix into one stream?~~
    - *Resolved:* Single Whisper context shared on one worker thread, mic and system audio processed as alternating segments with speaker labels.
 
-3. **LLM for note enhancement** — Local (Ollama) or cloud (OpenAI/Anthropic)?
-   - *Recommendation:* Support both. Default to cloud for quality, offer local for privacy.
+3. **LLM for note enhancement** — ~~Local (Ollama) or cloud (OpenAI/Anthropic)?~~
+   - *Resolved:* All three supported: Ollama (local, default), Anthropic (Claude), and OpenAI (GPT). Configurable in Settings → AI Summary. Provider abstraction via `LlmClient` trait.
 
 4. **Audio recording** — Should we save raw audio files, or transcript-only like Granola?
    - *Recommendation:* Transcript-only by default (privacy), with optional audio save for users who want it.

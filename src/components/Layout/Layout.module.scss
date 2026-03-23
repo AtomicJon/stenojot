@@ -7,6 +7,17 @@
   overflow: hidden;
 }
 
+.content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.navOuter {
+  border-bottom: $border-1 solid $color-border;
+}
+
 .nav {
   display: flex;
   align-items: center;
@@ -15,7 +26,6 @@
   width: 100%;
   margin: 0 auto;
   padding: $space-12 $space-24;
-  border-bottom: $border-1 solid $color-border;
 }
 
 .navBrand {
@@ -155,17 +165,4 @@
 
 .navLink:hover {
   color: $color-accent;
-}
-
-.layout {
-  max-width: $content-max-width;
-  width: 100%;
-  margin: 0 auto;
-  padding: $space-24;
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: $space-20;
-  overflow-y: auto;
 }

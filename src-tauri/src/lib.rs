@@ -1,5 +1,6 @@
 mod audio;
 mod commands;
+mod llm;
 mod markdown;
 mod settings;
 mod transcription;
@@ -43,6 +44,11 @@ pub fn run() {
             app_state.whisper_model = persisted.whisper_model;
             app_state.initial_prompt = persisted.initial_prompt;
             app_state.max_segment_seconds = persisted.max_segment_seconds;
+            app_state.llm_provider = persisted.llm_provider;
+            app_state.llm_model = persisted.llm_model;
+            app_state.llm_api_key = persisted.llm_api_key;
+            app_state.llm_base_url = persisted.llm_base_url;
+            app_state.auto_summary = persisted.auto_summary;
 
             if let Some(ref dir) = persisted.models_dir {
                 let _ = transcription::manager::set_models_dir(PathBuf::from(dir));
@@ -78,6 +84,13 @@ pub fn run() {
             commands::set_whisper_model,
             commands::set_initial_prompt,
             commands::set_max_segment_seconds,
+            commands::set_llm_provider,
+            commands::set_llm_model,
+            commands::set_llm_api_key,
+            commands::set_llm_base_url,
+            commands::set_auto_summary,
+            commands::generate_summary,
+            commands::read_meeting_summary,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

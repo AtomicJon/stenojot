@@ -34,6 +34,16 @@ pub struct Settings {
     pub initial_prompt: Option<String>,
     /// Maximum segment duration in seconds before forced transcription (1–30).
     pub max_segment_seconds: u32,
+    /// LLM provider for AI summary generation ("ollama", "anthropic", "openai").
+    pub llm_provider: String,
+    /// LLM model name override (empty/None = use provider default).
+    pub llm_model: Option<String>,
+    /// API key for cloud LLM providers (Anthropic, OpenAI).
+    pub llm_api_key: Option<String>,
+    /// Custom base URL for LLM provider (e.g. self-hosted Ollama).
+    pub llm_base_url: Option<String>,
+    /// Whether to auto-generate summaries after recording stops.
+    pub auto_summary: bool,
 }
 
 /// Default Whisper model name.
@@ -41,6 +51,9 @@ pub const DEFAULT_WHISPER_MODEL: &str = "base";
 
 /// Default maximum segment duration in seconds.
 pub const DEFAULT_MAX_SEGMENT_SECONDS: u32 = 15;
+
+/// Default LLM provider.
+pub const DEFAULT_LLM_PROVIDER: &str = "ollama";
 
 impl Default for Settings {
     fn default() -> Self {
@@ -55,6 +68,11 @@ impl Default for Settings {
             whisper_model: DEFAULT_WHISPER_MODEL.to_string(),
             initial_prompt: None,
             max_segment_seconds: DEFAULT_MAX_SEGMENT_SECONDS,
+            llm_provider: DEFAULT_LLM_PROVIDER.to_string(),
+            llm_model: None,
+            llm_api_key: None,
+            llm_base_url: None,
+            auto_summary: true,
         }
     }
 }
@@ -152,6 +170,11 @@ mod tests {
             whisper_model: "small".to_string(),
             initial_prompt: Some("Kubernetes, PostgreSQL".to_string()),
             max_segment_seconds: 20,
+            llm_provider: "anthropic".to_string(),
+            llm_model: Some("claude-opus-4-20250514".to_string()),
+            llm_api_key: Some("sk-ant-test".to_string()),
+            llm_base_url: None,
+            auto_summary: false,
         };
 
         // Act
@@ -167,6 +190,11 @@ mod tests {
         assert_eq!(loaded.whisper_model, "small");
         assert_eq!(loaded.initial_prompt.as_deref(), Some("Kubernetes, PostgreSQL"));
         assert_eq!(loaded.max_segment_seconds, 20);
+        assert_eq!(loaded.llm_provider, "anthropic");
+        assert_eq!(loaded.llm_model.as_deref(), Some("claude-opus-4-20250514"));
+        assert_eq!(loaded.llm_api_key.as_deref(), Some("sk-ant-test"));
+        assert!(loaded.llm_base_url.is_none());
+        assert!(!loaded.auto_summary);
     }
 
     #[test]
@@ -212,6 +240,31 @@ mod tests {
         // Assert
         assert!(result.is_ok());
         assert!(nested.join("settings.json").exists());
+    }
+
+    #[test]
+    fn load_handles_old_json_without_llm_fields() {
+        // Arrange — JSON from before Phase 4, no LLM fields
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("settings.json");
+        fs::write(
+            &path,
+            r#"{ "mic_gain": 1.5, "whisper_model": "small" }"#,
+        )
+        .unwrap();
+
+        // Act
+        let settings = load(tmp.path());
+
+        // Assert — LLM fields should have defaults
+        assert_eq!(settings.llm_provider, DEFAULT_LLM_PROVIDER);
+        assert!(settings.llm_model.is_none());
+        assert!(settings.llm_api_key.is_none());
+        assert!(settings.llm_base_url.is_none());
+        assert!(settings.auto_summary);
+        // Non-LLM fields still loaded
+        assert!((settings.mic_gain - 1.5).abs() < f32::EPSILON);
+        assert_eq!(settings.whisper_model, "small");
     }
 
     #[test]

@@ -10,6 +10,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::audio::types::TranscriptSegment;
+use crate::llm::provider::LlmError;
 
 /// A single meeting entry parsed from the output directory.
 #[derive(Debug, Clone, Serialize)]
@@ -147,6 +148,86 @@ pub fn update_transcript(
         .map_err(|e| format!("Failed to rename transcript file: {}", e))?;
 
     Ok(())
+}
+
+/// Compute the summary file path for a given transcript file path.
+///
+/// Transforms `YYYY-MM-DD HH.MM Name - Transcript.md` → `YYYY-MM-DD HH.MM Name.md`.
+pub fn summary_path_for_transcript(transcript_path: &Path) -> PathBuf {
+    let filename = transcript_path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy();
+
+    let summary_filename = if let Some(stem) = filename.strip_suffix(" - Transcript.md") {
+        format!("{}.md", stem)
+    } else {
+        // Fallback: just replace extension
+        format!("{}.summary.md", filename.trim_end_matches(".md"))
+    };
+
+    transcript_path
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join(summary_filename)
+}
+
+/// Write a summary Markdown file atomically (temp file + rename).
+pub fn write_summary(path: &Path, content: &str) -> Result<(), LlmError> {
+    let tmp_path = path.with_extension("md.tmp");
+
+    fs::write(&tmp_path, content)
+        .map_err(|e| LlmError::Network(format!("Failed to write summary file: {}", e)))?;
+
+    fs::rename(&tmp_path, path)
+        .map_err(|e| LlmError::Network(format!("Failed to rename summary file: {}", e)))?;
+
+    eprintln!("Summary saved to {}", path.display());
+    Ok(())
+}
+
+/// Rename meeting files when the LLM generates a better title.
+///
+/// Renames the transcript file (and summary file if it exists) from the
+/// old meeting name to the new one. Returns the new transcript path.
+pub fn rename_meeting_files(
+    transcript_path: &Path,
+    output_dir: &Path,
+    start_time: &DateTime<Local>,
+    _old_name: &str,
+    new_name: &str,
+) -> Result<PathBuf, String> {
+    let safe_name = sanitize_filename(new_name);
+    let new_transcript_filename = format!(
+        "{} {} - Transcript.md",
+        start_time.format("%Y-%m-%d %H.%M"),
+        safe_name
+    );
+    let new_transcript_path = output_dir.join(&new_transcript_filename);
+
+    // Don't rename if the path hasn't changed
+    if transcript_path == new_transcript_path {
+        return Ok(transcript_path.to_path_buf());
+    }
+
+    // Don't overwrite an existing file
+    if new_transcript_path.exists() {
+        return Err(format!(
+            "Cannot rename: {} already exists",
+            new_transcript_path.display()
+        ));
+    }
+
+    fs::rename(transcript_path, &new_transcript_path)
+        .map_err(|e| format!("Failed to rename transcript: {}", e))?;
+
+    eprintln!(
+        "Renamed transcript: {} → {}",
+        transcript_path.display(),
+        new_transcript_path.display()
+    );
+
+    Ok(new_transcript_path)
 }
 
 /// List meetings in the output directory by parsing transcript filenames.
@@ -529,5 +610,109 @@ mod tests {
 
         // Assert
         assert!(meetings.is_empty());
+    }
+
+    #[test]
+    fn summary_path_for_transcript_standard() {
+        // Arrange
+        let transcript = PathBuf::from("/output/2026-03-22 14.00 Sprint Planning - Transcript.md");
+
+        // Act
+        let summary = summary_path_for_transcript(&transcript);
+
+        // Assert
+        assert_eq!(
+            summary,
+            PathBuf::from("/output/2026-03-22 14.00 Sprint Planning.md")
+        );
+    }
+
+    #[test]
+    fn summary_path_for_transcript_non_standard_filename() {
+        // Arrange
+        let transcript = PathBuf::from("/output/random-notes.md");
+
+        // Act
+        let summary = summary_path_for_transcript(&transcript);
+
+        // Assert
+        assert_eq!(
+            summary,
+            PathBuf::from("/output/random-notes.summary.md")
+        );
+    }
+
+    #[test]
+    fn write_summary_creates_file() {
+        // Arrange
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("2026-03-22 14.00 Test.md");
+        let content = "# Test\n\n## Key Points\n- Item 1\n";
+
+        // Act
+        let result = write_summary(&path, content);
+
+        // Assert
+        assert!(result.is_ok());
+        assert!(path.exists());
+        let written = fs::read_to_string(&path).unwrap();
+        assert_eq!(written, content);
+    }
+
+    #[test]
+    fn rename_meeting_files_renames_transcript() {
+        // Arrange
+        let tmp = tempfile::tempdir().unwrap();
+        let start = chrono::Local::now();
+        let old_path = write_transcript(tmp.path(), &[], "Meeting at 14-00", start, start).unwrap();
+        assert!(old_path.exists());
+
+        // Act
+        let new_path = rename_meeting_files(
+            &old_path,
+            tmp.path(),
+            &start,
+            "Meeting at 14-00",
+            "Sprint Planning",
+        )
+        .unwrap();
+
+        // Assert
+        assert!(!old_path.exists());
+        assert!(new_path.exists());
+        assert!(new_path.to_string_lossy().contains("Sprint Planning"));
+    }
+
+    #[test]
+    fn rename_meeting_files_same_name_returns_original() {
+        // Arrange
+        let tmp = tempfile::tempdir().unwrap();
+        let start = chrono::Local::now();
+        let path = write_transcript(tmp.path(), &[], "Standup", start, start).unwrap();
+
+        // Act
+        let result = rename_meeting_files(&path, tmp.path(), &start, "Standup", "Standup").unwrap();
+
+        // Assert
+        assert_eq!(result, path);
+        assert!(path.exists());
+    }
+
+    #[test]
+    fn list_meetings_detects_summary() {
+        // Arrange
+        let tmp = tempfile::tempdir().unwrap();
+        let transcript_name = "2026-03-22 14.00 Standup - Transcript.md";
+        let summary_name = "2026-03-22 14.00 Standup.md";
+        fs::write(tmp.path().join(transcript_name), "# content").unwrap();
+        fs::write(tmp.path().join(summary_name), "# summary").unwrap();
+
+        // Act
+        let meetings = list_meetings_in_dir(tmp.path());
+
+        // Assert
+        assert_eq!(meetings.len(), 1);
+        assert!(meetings[0].has_summary);
+        assert!(!meetings[0].summary_path.is_empty());
     }
 }

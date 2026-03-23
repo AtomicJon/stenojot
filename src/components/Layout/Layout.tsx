@@ -1,5 +1,8 @@
+import { useEffect, useRef } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { useRecording } from "../../hooks/useRecording";
+import type { SummaryStatus } from "../../hooks/useRecording";
+import { useToast } from "../Toast";
 import { formatTime } from "../../lib/format";
 import s from "./Layout.module.scss";
 
@@ -14,13 +17,33 @@ export function Layout() {
     handleStop,
     handlePause,
     handleResume,
+    summaryStatus,
+    summaryError,
   } = useRecording();
+  const { showToast } = useToast();
+  const prevStatus = useRef<SummaryStatus>("idle");
+
+  useEffect(() => {
+    if (prevStatus.current === summaryStatus) return;
+    prevStatus.current = summaryStatus;
+
+    if (summaryStatus === "complete") {
+      showToast("Meeting summary generated successfully.", "success");
+    } else if (summaryStatus === "error") {
+      showToast(
+        `Summary generation failed: ${summaryError ?? "Unknown error"}`,
+        "error",
+        10000,
+      );
+    }
+  }, [summaryStatus, summaryError, showToast]);
 
   const location = useLocation();
   const isOnRecordingPage = location.pathname === "/";
 
   return (
     <div className={s.shell}>
+      <div className={s.navOuter}>
       <nav className={s.nav}>
         <Link to="/" className={s.navBrand}>
           EchoNotes
@@ -63,7 +86,8 @@ export function Layout() {
           </Link>
         </div>
       </nav>
-      <main className={s.layout}>
+      </div>
+      <main className={s.content}>
         <Outlet />
       </main>
     </div>

@@ -36,6 +36,11 @@ export interface PersistedSettings {
   whisper_model: string;
   initial_prompt: string | null;
   max_segment_seconds: number;
+  llm_provider: string;
+  llm_model: string | null;
+  llm_api_key: string | null;
+  llm_base_url: string | null;
+  auto_summary: boolean;
 }
 
 /** Result returned by `start_recording`. */
@@ -60,6 +65,13 @@ export interface MeetingEntry {
   transcript_path: string;
   summary_path: string;
   size_bytes: number;
+}
+
+/** Event payload emitted when background summary generation completes. */
+export interface SummaryGeneratedEvent {
+  transcript_path: string;
+  summary_path: string;
+  meeting_name: string;
 }
 
 /** A single segment of transcribed speech. */

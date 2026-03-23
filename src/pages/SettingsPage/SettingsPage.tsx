@@ -11,6 +11,11 @@ import {
   setWhisperModel,
   setInitialPrompt,
   setMaxSegmentSeconds,
+  setLlmProvider,
+  setLlmModel,
+  setLlmApiKey,
+  setLlmBaseUrl,
+  setAutoSummary,
 } from "../../lib/commands";
 import { formatFileSize } from "../../lib/format";
 import { useRecording } from "../../hooks/useRecording";
@@ -46,6 +51,12 @@ export function SettingsPage() {
   const [promptSaved, setPromptSaved] = useState(false);
   const [maxSegmentSeconds, setMaxSegmentSecondsState] = useState(15);
   const [segmentSaved, setSegmentSaved] = useState(false);
+  const [llmProviderValue, setLlmProviderValue] = useState("ollama");
+  const [llmModelValue, setLlmModelValue] = useState("");
+  const [llmApiKeyValue, setLlmApiKeyValue] = useState("");
+  const [llmBaseUrlValue, setLlmBaseUrlValue] = useState("");
+  const [autoSummaryValue, setAutoSummaryValue] = useState(true);
+  const [llmSaved, setLlmSaved] = useState(false);
 
   /** Load model info from the backend. */
   const loadModelInfo = useCallback(async () => {
@@ -68,6 +79,11 @@ export function SettingsPage() {
         setWhisperModelState(settings.whisper_model);
         setInitialPromptState(settings.initial_prompt ?? "");
         setMaxSegmentSecondsState(settings.max_segment_seconds);
+        setLlmProviderValue(settings.llm_provider);
+        setLlmModelValue(settings.llm_model ?? "");
+        setLlmApiKeyValue(settings.llm_api_key ?? "");
+        setLlmBaseUrlValue(settings.llm_base_url ?? "");
+        setAutoSummaryValue(settings.auto_summary);
       } catch (err) {
         console.error("Failed to load output settings:", err);
       }
@@ -178,6 +194,43 @@ export function SettingsPage() {
     }
   }, [initialPrompt]);
 
+  /** Handle LLM provider change. */
+  const handleLlmProviderChange = useCallback(async (provider: string) => {
+    setLlmProviderValue(provider);
+    setLlmSaved(false);
+    try {
+      await setLlmProvider(provider);
+    } catch (err) {
+      console.error("Failed to set LLM provider:", err);
+    }
+  }, []);
+
+  /** Save LLM settings (model, API key, base URL). */
+  const handleSaveLlmSettings = useCallback(async () => {
+    try {
+      await Promise.all([
+        setLlmModel(llmModelValue),
+        setLlmApiKey(llmApiKeyValue),
+        setLlmBaseUrl(llmBaseUrlValue),
+      ]);
+      setLlmSaved(true);
+      setTimeout(() => setLlmSaved(false), 2000);
+    } catch (err) {
+      console.error("Failed to save LLM settings:", err);
+    }
+  }, [llmModelValue, llmApiKeyValue, llmBaseUrlValue]);
+
+  /** Toggle auto-summary generation. */
+  const handleAutoSummaryToggle = useCallback(async () => {
+    const newValue = !autoSummaryValue;
+    setAutoSummaryValue(newValue);
+    try {
+      await setAutoSummary(newValue);
+    } catch (err) {
+      console.error("Failed to set auto-summary:", err);
+    }
+  }, [autoSummaryValue]);
+
   /** Save the max segment seconds setting. */
   const handleSaveMaxSegment = useCallback(async () => {
     try {
@@ -201,21 +254,24 @@ export function SettingsPage() {
 
   if (!modelInfo) {
     return (
-      <>
-        <header className={s.header}>
-          <h1>Settings</h1>
-        </header>
-        <div className={s.loading}>Loading settings...</div>
-      </>
+      <div className={s.scrollPage}>
+        <div className={s.scrollPageInner}>
+          <header className={s.header}>
+            <h1>Settings</h1>
+          </header>
+          <div className={s.loading}>Loading settings...</div>
+        </div>
+      </div>
     );
   }
 
   return (
-    <>
-      {/* Header */}
-      <header className={s.header}>
-        <h1>Settings</h1>
-      </header>
+    <div className={s.scrollPage}>
+      <div className={s.scrollPageInner}>
+        {/* Header */}
+        <header className={s.header}>
+          <h1>Settings</h1>
+        </header>
 
       {/* Audio Sources */}
       <Panel title="Audio Sources">
@@ -358,6 +414,89 @@ export function SettingsPage() {
         </Button>
       </Panel>
 
+      {/* AI Summary */}
+      <Panel title="AI Summary">
+        <p className={s.sectionDesc}>
+          Configure LLM provider for post-meeting summary generation.
+        </p>
+
+        <div className={s.fieldGroup}>
+          <Select
+            label="Provider"
+            value={llmProviderValue}
+            options={[
+              { value: "ollama", label: "Ollama (Local)" },
+              { value: "anthropic", label: "Anthropic (Claude)" },
+              { value: "openai", label: "OpenAI (GPT)" },
+            ]}
+            onChange={handleLlmProviderChange}
+          />
+        </div>
+
+        <div className={s.pathInputRow}>
+          <input
+            type="text"
+            className={s.pathInput}
+            value={llmModelValue}
+            onChange={(e) => {
+              setLlmModelValue(e.target.value);
+              setLlmSaved(false);
+            }}
+            placeholder={
+              llmProviderValue === "anthropic"
+                ? "claude-sonnet-4-20250514"
+                : llmProviderValue === "openai"
+                  ? "gpt-4o"
+                  : "llama3.1"
+            }
+          />
+        </div>
+
+        {(llmProviderValue === "anthropic" || llmProviderValue === "openai") && (
+          <div className={s.pathInputRow}>
+            <input
+              type="password"
+              className={s.pathInput}
+              value={llmApiKeyValue}
+              onChange={(e) => {
+                setLlmApiKeyValue(e.target.value);
+                setLlmSaved(false);
+              }}
+              placeholder="API Key"
+            />
+          </div>
+        )}
+
+        <div className={s.pathInputRow}>
+          <input
+            type="text"
+            className={s.pathInput}
+            value={llmBaseUrlValue}
+            onChange={(e) => {
+              setLlmBaseUrlValue(e.target.value);
+              setLlmSaved(false);
+            }}
+            placeholder={
+              llmProviderValue === "ollama"
+                ? "http://localhost:11434"
+                : "Custom base URL (optional)"
+            }
+          />
+          <Button onClick={handleSaveLlmSettings}>
+            {llmSaved ? "Saved" : "Save"}
+          </Button>
+        </div>
+
+        <label className={s.checkboxRow}>
+          <input
+            type="checkbox"
+            checked={autoSummaryValue}
+            onChange={handleAutoSummaryToggle}
+          />
+          <span>Auto-generate summary after recording stops</span>
+        </label>
+      </Panel>
+
       {/* Auto-Stop */}
       <Panel title="Auto-Stop">
         <p className={s.sectionDesc}>
@@ -435,6 +574,7 @@ export function SettingsPage() {
           </Button>
         </div>
       </Panel>
-    </>
+      </div>
+    </div>
   );
 }

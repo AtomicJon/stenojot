@@ -29,7 +29,7 @@ export function RecordingPage() {
   }, [segments]);
 
   return (
-    <>
+    <div className={s.page}>
       {/* Model not downloaded notice */}
       {!modelReady && (
         <div className={s.modelNotice}>
@@ -104,6 +104,6 @@ export function RecordingPage() {
           </div>
         )}
       </Panel>
-    </>
+    </div>
   );
 }

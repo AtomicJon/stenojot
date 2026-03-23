@@ -1,5 +1,22 @@
 @use "../../styles" as *;
 
+// ── Page wrapper (scrollable, full-width scrollbar) ──
+.scrollPage {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.scrollPageInner {
+  max-width: $content-max-width;
+  width: 100%;
+  margin: 0 auto;
+  padding: $space-24;
+  display: flex;
+  flex-direction: column;
+  gap: $space-20;
+}
+
 // ── Header ──────────────────────────────────────
 .header {
   padding-bottom: $space-16;
@@ -137,4 +154,15 @@
   font-size: $font-sm;
   color: $color-text-secondary;
   align-self: center;
+}
+
+// ── Checkbox row ──────────────────────────────
+.checkboxRow {
+  display: flex;
+  align-items: center;
+  gap: $space-8;
+  font-size: $font-base;
+  color: $color-text;
+  cursor: pointer;
+  margin-top: $space-8;
 }

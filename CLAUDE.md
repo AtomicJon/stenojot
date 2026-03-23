@@ -33,7 +33,11 @@ React hook → `src/lib/commands.ts` wrapper → `invoke()` → Rust `#[tauri::c
 
 ### Routing
 
-React Router v7 with routes wrapped in a `Layout` shell. Currently: `/` (RecordingPage).
+React Router v7 with routes wrapped in a `Layout` shell. Currently: `/` (RecordingPage), `/meetings` (MeetingsPage), `/settings` (SettingsPage).
+
+### LLM Integration
+
+`src-tauri/src/llm/` module provides trait-based LLM provider abstraction. `LlmClient` trait with implementations for Ollama, Anthropic, and OpenAI. Summary generation runs on a background `std::thread` using `reqwest::blocking`. Chunked summarization for long transcripts (iterative refinement). Background tasks communicate results via Tauri events (`summary-generating`, `summary-generated`, `summary-error`).
 
 ## Coding Conventions
 

@@ -11,6 +11,8 @@ use crate::audio::capture;
 use crate::audio::pipeline;
 use crate::audio::system_capture::{self, SystemCaptureHandle};
 use crate::audio::types::{AudioDevice, AudioLevels, CaptureError, TranscriptSegment};
+use crate::llm;
+use crate::llm::provider::{LlmConfig, parse_provider};
 use crate::markdown;
 use crate::settings::{self, Settings};
 use crate::transcription::manager::{self, ModelInfo};
@@ -58,6 +60,16 @@ pub struct AppState {
     pub current_transcript_path: Option<PathBuf>,
     /// Meeting name for the current recording session.
     pub current_meeting_name: Option<String>,
+    /// LLM provider for summary generation ("ollama", "anthropic", "openai").
+    pub llm_provider: String,
+    /// LLM model name override (None = use provider default).
+    pub llm_model: Option<String>,
+    /// API key for cloud LLM providers (Anthropic, OpenAI).
+    pub llm_api_key: Option<String>,
+    /// Custom base URL for LLM provider.
+    pub llm_base_url: Option<String>,
+    /// Whether to auto-generate summaries after recording stops.
+    pub auto_summary: bool,
 }
 
 // Safety: cpal::Stream is !Send and !Sync, but we only ever access it
@@ -99,6 +111,11 @@ impl AppState {
             is_paused: false,
             current_transcript_path: None,
             current_meeting_name: None,
+            llm_provider: settings::DEFAULT_LLM_PROVIDER.to_string(),
+            llm_model: None,
+            llm_api_key: None,
+            llm_base_url: None,
+            auto_summary: true,
         }
     }
 }
@@ -117,6 +134,11 @@ fn save_current_settings(app_state: &AppState) {
         whisper_model: app_state.whisper_model.clone(),
         initial_prompt: app_state.initial_prompt.clone(),
         max_segment_seconds: app_state.max_segment_seconds,
+        llm_provider: app_state.llm_provider.clone(),
+        llm_model: app_state.llm_model.clone(),
+        llm_api_key: app_state.llm_api_key.clone(),
+        llm_base_url: app_state.llm_base_url.clone(),
+        auto_summary: app_state.auto_summary,
     };
     if let Err(e) = settings::save(&app_state.config_dir, &settings) {
         eprintln!("Failed to save settings: {}", e);
@@ -395,10 +417,14 @@ pub fn stop_recording(
         .take()
         .unwrap_or_else(chrono::Local::now);
 
+    let end_time = chrono::Local::now();
+    let name_str = meeting_name
+        .as_deref()
+        .unwrap_or("Meeting")
+        .to_string();
+
     let path_str = if let Some(ref path) = transcript_path {
-        let end_time = chrono::Local::now();
-        let name = meeting_name.as_deref().unwrap_or("Meeting");
-        if let Err(e) = markdown::update_transcript(path, &segments, name, start_time, end_time) {
+        if let Err(e) = markdown::update_transcript(path, &segments, &name_str, start_time, end_time) {
             eprintln!("Failed to write final transcript: {}", e);
         }
         Some(path.to_string_lossy().to_string())
@@ -409,10 +435,72 @@ pub fn stop_recording(
     // Notify frontend that meetings list changed
     let _ = app.emit("meetings-changed", ());
 
+    // Spawn background summary generation if enabled
+    if app_state.auto_summary {
+        if let Some(ref tx_path_str) = path_str {
+            let config = LlmConfig {
+                provider: parse_provider(&app_state.llm_provider),
+                model: app_state.llm_model.clone().unwrap_or_default(),
+                api_key: app_state.llm_api_key.clone(),
+                base_url: app_state.llm_base_url.clone(),
+            };
+            let tx_path = PathBuf::from(tx_path_str);
+            let loaded = settings::load(&app_state.config_dir);
+            let out_dir = loaded.output_dir_resolved();
+            let name = name_str.clone();
+            let app_handle = app.clone();
+
+            std::thread::spawn(move || {
+                let _ = app_handle.emit("summary-generating", ());
+                match llm::summary::generate_summary(
+                    &config,
+                    &tx_path,
+                    &out_dir,
+                    start_time,
+                    end_time,
+                    &name,
+                ) {
+                    Ok(result) => {
+                        let _ = app_handle.emit(
+                            "summary-generated",
+                            SummaryEvent {
+                                transcript_path: result
+                                    .transcript_path
+                                    .to_string_lossy()
+                                    .to_string(),
+                                summary_path: result
+                                    .summary_path
+                                    .to_string_lossy()
+                                    .to_string(),
+                                meeting_name: result.meeting_name,
+                            },
+                        );
+                        let _ = app_handle.emit("meetings-changed", ());
+                    }
+                    Err(e) => {
+                        eprintln!("Summary generation failed: {}", e);
+                        let _ = app_handle.emit("summary-error", e.to_string());
+                    }
+                }
+            });
+        }
+    }
+
     Ok(StopRecordingResult {
         transcript_path: path_str,
         segment_count,
     })
+}
+
+/// Event payload emitted when summary generation completes.
+#[derive(serde::Serialize, Clone)]
+struct SummaryEvent {
+    /// Path to the transcript file (may have been renamed).
+    transcript_path: String,
+    /// Path to the generated summary file.
+    summary_path: String,
+    /// LLM-generated meeting name.
+    meeting_name: String,
 }
 
 /// Get current audio input levels for the mic and system streams.
@@ -613,4 +701,147 @@ pub fn save_current_transcript(
     let _ = app.emit("meetings-changed", ());
 
     Ok(count)
+}
+
+/// Set and persist the LLM provider for summary generation.
+///
+/// Valid values: "ollama", "anthropic", "openai". Unknown values default to "ollama".
+#[tauri::command]
+pub fn set_llm_provider(
+    provider: String,
+    state: State<'_, Mutex<AppState>>,
+) -> Result<(), String> {
+    let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    // Validate and normalize the provider string
+    let normalized = parse_provider(&provider).to_string();
+    app_state.llm_provider = normalized;
+    save_current_settings(&app_state);
+    Ok(())
+}
+
+/// Set and persist the LLM model name override.
+///
+/// Pass an empty string to use the provider's default model.
+#[tauri::command]
+pub fn set_llm_model(model: String, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
+    let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    app_state.llm_model = if model.is_empty() {
+        None
+    } else {
+        Some(model)
+    };
+    save_current_settings(&app_state);
+    Ok(())
+}
+
+/// Set and persist the API key for cloud LLM providers.
+///
+/// Pass an empty string to clear the key.
+#[tauri::command]
+pub fn set_llm_api_key(key: String, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
+    let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    app_state.llm_api_key = if key.is_empty() { None } else { Some(key) };
+    save_current_settings(&app_state);
+    Ok(())
+}
+
+/// Set and persist a custom base URL for the LLM provider.
+///
+/// Pass an empty string to use the provider's default URL.
+#[tauri::command]
+pub fn set_llm_base_url(url: String, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
+    let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    app_state.llm_base_url = if url.is_empty() { None } else { Some(url) };
+    save_current_settings(&app_state);
+    Ok(())
+}
+
+/// Enable or disable automatic summary generation after recording stops.
+#[tauri::command]
+pub fn set_auto_summary(
+    enabled: bool,
+    state: State<'_, Mutex<AppState>>,
+) -> Result<(), String> {
+    let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    app_state.auto_summary = enabled;
+    save_current_settings(&app_state);
+    Ok(())
+}
+
+/// Manually trigger summary generation for an existing transcript.
+///
+/// Runs in a background thread; emits `summary-generated` or `summary-error`
+/// events when complete.
+#[tauri::command]
+pub fn generate_summary(
+    transcript_path: String,
+    state: State<'_, Mutex<AppState>>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+
+    let config = LlmConfig {
+        provider: parse_provider(&app_state.llm_provider),
+        model: app_state.llm_model.clone().unwrap_or_default(),
+        api_key: app_state.llm_api_key.clone(),
+        base_url: app_state.llm_base_url.clone(),
+    };
+
+    let loaded = settings::load(&app_state.config_dir);
+    let out_dir = loaded.output_dir_resolved();
+    drop(app_state); // Release lock before spawning
+
+    let tx_path = PathBuf::from(&transcript_path);
+
+    // Parse meeting name and start time from the transcript filename
+    let filename = tx_path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    let meeting_name = filename
+        .strip_suffix(" - Transcript.md")
+        .and_then(|stem| stem.get(17..))
+        .map(|n| n.trim().to_string())
+        .unwrap_or_else(|| "Meeting".to_string());
+
+    let now = chrono::Local::now();
+
+    let app_handle = app.clone();
+    std::thread::spawn(move || {
+        let _ = app_handle.emit("summary-generating", ());
+        match llm::summary::generate_summary(
+            &config,
+            &tx_path,
+            &out_dir,
+            now,
+            now,
+            &meeting_name,
+        ) {
+            Ok(result) => {
+                let _ = app_handle.emit(
+                    "summary-generated",
+                    SummaryEvent {
+                        transcript_path: result.transcript_path.to_string_lossy().to_string(),
+                        summary_path: result.summary_path.to_string_lossy().to_string(),
+                        meeting_name: result.meeting_name,
+                    },
+                );
+                let _ = app_handle.emit("meetings-changed", ());
+            }
+            Err(e) => {
+                eprintln!("Summary generation failed: {}", e);
+                let _ = app_handle.emit("summary-error", e.to_string());
+            }
+        }
+    });
+
+    Ok(())
+}
+
+/// Read the contents of a summary file.
+#[tauri::command]
+pub fn read_meeting_summary(path: String) -> Result<String, String> {
+    std::fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read summary: {}", e))
 }

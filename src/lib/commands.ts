@@ -209,3 +209,63 @@ export function listMeetings(): Promise<MeetingEntry[]> {
 export function readMeetingTranscript(path: string): Promise<string> {
   return invoke<string>("read_meeting_transcript", { path });
 }
+
+/**
+ * Set and persist the LLM provider for summary generation.
+ * @param provider - Provider identifier ("ollama", "anthropic", "openai")
+ */
+export function setLlmProvider(provider: string): Promise<void> {
+  return invoke("set_llm_provider", { provider });
+}
+
+/**
+ * Set and persist the LLM model name override.
+ * Pass an empty string to use the provider's default model.
+ * @param model - Model name
+ */
+export function setLlmModel(model: string): Promise<void> {
+  return invoke("set_llm_model", { model });
+}
+
+/**
+ * Set and persist the API key for cloud LLM providers.
+ * Pass an empty string to clear.
+ * @param key - API key
+ */
+export function setLlmApiKey(key: string): Promise<void> {
+  return invoke("set_llm_api_key", { key });
+}
+
+/**
+ * Set and persist a custom base URL for the LLM provider.
+ * Pass an empty string to use the provider's default URL.
+ * @param url - Custom base URL
+ */
+export function setLlmBaseUrl(url: string): Promise<void> {
+  return invoke("set_llm_base_url", { url });
+}
+
+/**
+ * Enable or disable automatic summary generation after recording stops.
+ * @param enabled - Whether auto-summary is enabled
+ */
+export function setAutoSummary(enabled: boolean): Promise<void> {
+  return invoke("set_auto_summary", { enabled });
+}
+
+/**
+ * Manually trigger summary generation for an existing transcript.
+ * Runs in the background; listen for `summary-generated` or `summary-error` events.
+ * @param transcriptPath - Absolute path to the transcript file
+ */
+export function generateSummary(transcriptPath: string): Promise<void> {
+  return invoke("generate_summary", { transcriptPath });
+}
+
+/**
+ * Read the contents of a summary file.
+ * @param path - Absolute path to the summary file
+ */
+export function readMeetingSummary(path: string): Promise<string> {
+  return invoke<string>("read_meeting_summary", { path });
+}

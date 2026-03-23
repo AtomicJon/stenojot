@@ -1,0 +1,74 @@
+@use "../../styles" as *;
+
+.overlay {
+  position: fixed;
+  bottom: $space-24;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: $space-8;
+  pointer-events: none;
+}
+
+.toast {
+  padding: $space-12 $space-20;
+  border-radius: $radius-10;
+  font-size: $font-sm;
+  font-weight: $weight-semibold;
+  color: $color-text;
+  border: $border-1 solid $color-border;
+  background-color: $color-surface;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: $space-12;
+  max-width: 500px;
+  animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.toastError {
+  border-color: $color-error;
+  background-color: $color-error-bg;
+}
+
+.toastSuccess {
+  border-color: $color-success;
+}
+
+.toastInfo {
+  border-color: $color-accent;
+}
+
+.message {
+  flex: 1;
+  word-break: break-word;
+}
+
+.dismiss {
+  background: none;
+  border: none;
+  color: $color-text-muted;
+  cursor: pointer;
+  font-size: $font-base;
+  font-family: inherit;
+  padding: $space-4;
+  line-height: 1;
+}
+
+.dismiss:hover {
+  color: $color-text;
+}
