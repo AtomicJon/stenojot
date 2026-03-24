@@ -20,6 +20,19 @@ export function formatTimestamp(ms: number): string {
  * Format bytes to a human-readable file size string.
  * @param bytes - Size in bytes
  */
+/**
+ * Generate a URL-safe slug for a meeting from its date, time, and name.
+ * Format: `YYYY-MM-DD_HH.MM_Name` (spaces in name replaced with hyphens).
+ * @param date - Meeting date (YYYY-MM-DD)
+ * @param time - Meeting time (HH:MM)
+ * @param name - Meeting display name
+ */
+export function meetingSlug(date: string, time: string, name: string): string {
+  const safeTime = time.replace(':', '.');
+  const safeName = name.replace(/\s+/g, '-');
+  return `${date}_${safeTime}_${safeName}`;
+}
+
 export function formatFileSize(bytes: number): string {
   if (bytes === 0) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB'];

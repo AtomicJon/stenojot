@@ -5,6 +5,7 @@ import { ToastProvider } from './components/Toast';
 import { RecordingPage } from './pages/RecordingPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { MeetingsPage } from './pages/MeetingsPage';
+import { MeetingDetailPage } from './pages/MeetingDetailPage';
 import './global.scss';
 
 function App() {
@@ -16,6 +17,7 @@ function App() {
             <Route element={<Layout />}>
               <Route path="/" element={<RecordingPage />} />
               <Route path="/meetings" element={<MeetingsPage />} />
+              <Route path="/meetings/:meetingId" element={<MeetingDetailPage />} />
               <Route path="/settings" element={<SettingsPage />} />
             </Route>
           </Routes>

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatTime, formatTimestamp, formatFileSize } from './format';
+import { formatTime, formatTimestamp, formatFileSize, meetingSlug } from './format';
 
 describe('formatTime', () => {
   it('formats zero seconds as 00:00', () => {
@@ -136,5 +136,39 @@ describe('formatFileSize', () => {
 
     // Assert
     expect(result).toBe('2.5 GB');
+  });
+});
+
+describe('meetingSlug', () => {
+  it('generates slug from date, time, and name', () => {
+    // Arrange / Act
+    const slug = meetingSlug('2026-03-22', '14:00', 'Standup');
+
+    // Assert
+    expect(slug).toBe('2026-03-22_14.00_Standup');
+  });
+
+  it('replaces colon in time with dot', () => {
+    // Arrange / Act
+    const slug = meetingSlug('2026-01-01', '09:30', 'Review');
+
+    // Assert
+    expect(slug).toBe('2026-01-01_09.30_Review');
+  });
+
+  it('replaces spaces in name with hyphens', () => {
+    // Arrange / Act
+    const slug = meetingSlug('2026-03-22', '10:00', 'Team Planning Session');
+
+    // Assert
+    expect(slug).toBe('2026-03-22_10.00_Team-Planning-Session');
+  });
+
+  it('handles consecutive spaces in name', () => {
+    // Arrange / Act
+    const slug = meetingSlug('2026-03-22', '10:00', 'My  Meeting');
+
+    // Assert
+    expect(slug).toBe('2026-03-22_10.00_My-Meeting');
   });
 });

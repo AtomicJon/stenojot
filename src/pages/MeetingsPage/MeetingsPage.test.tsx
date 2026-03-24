@@ -1,20 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { MeetingsPage } from './MeetingsPage';
 
 vi.mock('../../lib/commands', () => ({
   listMeetings: vi.fn(),
-  readMeetingTranscript: vi.fn(),
 }));
 
 vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn(() => Promise.resolve(() => {})),
 }));
 
-import { listMeetings, readMeetingTranscript } from '../../lib/commands';
+import { listMeetings } from '../../lib/commands';
 
 const mockListMeetings = vi.mocked(listMeetings);
-const mockReadTranscript = vi.mocked(readMeetingTranscript);
 
 describe('MeetingsPage', () => {
   beforeEach(() => {
@@ -26,7 +25,11 @@ describe('MeetingsPage', () => {
     mockListMeetings.mockResolvedValue([]);
 
     // Act
-    render(<MeetingsPage />);
+    render(
+      <MemoryRouter>
+        <MeetingsPage />
+      </MemoryRouter>,
+    );
 
     // Assert
     await waitFor(() => {
@@ -60,7 +63,11 @@ describe('MeetingsPage', () => {
     ]);
 
     // Act
-    render(<MeetingsPage />);
+    render(
+      <MemoryRouter>
+        <MeetingsPage />
+      </MemoryRouter>,
+    );
 
     // Assert
     await waitFor(() => {
@@ -70,7 +77,7 @@ describe('MeetingsPage', () => {
     expect(screen.getAllByText('2026-03-22')).toHaveLength(2);
   });
 
-  it('opens transcript when a meeting card is clicked', async () => {
+  it('meeting cards link to detail pages', async () => {
     // Arrange
     mockListMeetings.mockResolvedValue([
       {
@@ -84,83 +91,23 @@ describe('MeetingsPage', () => {
         size_bytes: 1024,
       },
     ]);
-    mockReadTranscript.mockResolvedValue('# Standup Transcript\n\nHello.');
 
     // Act
-    render(<MeetingsPage />);
+    render(
+      <MemoryRouter>
+        <MeetingsPage />
+      </MemoryRouter>,
+    );
+
+    // Assert
     await waitFor(() => {
       expect(screen.getByText('Standup')).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByText('Standup'));
-
-    // Assert
-    await waitFor(() => {
-      expect(screen.getByText(/Standup Transcript/)).toBeInTheDocument();
-    });
-    expect(mockReadTranscript).toHaveBeenCalledWith('/output/standup.md');
-  });
-
-  it('shows back button when viewing a transcript', async () => {
-    // Arrange
-    mockListMeetings.mockResolvedValue([
-      {
-        name: 'Meeting',
-        date: '2026-03-22',
-        time: '10:00',
-        has_transcript: true,
-        has_summary: false,
-        transcript_path: '/output/meeting.md',
-        summary_path: '',
-        size_bytes: 512,
-      },
-    ]);
-    mockReadTranscript.mockResolvedValue('Content here');
-
-    // Act
-    render(<MeetingsPage />);
-    await waitFor(() => {
-      expect(screen.getByText('Meeting')).toBeInTheDocument();
-    });
-    fireEvent.click(screen.getByText('Meeting'));
-
-    // Assert
-    await waitFor(() => {
-      expect(screen.getByText('Back to Meetings')).toBeInTheDocument();
-    });
-  });
-
-  it('returns to meeting list when back button is clicked', async () => {
-    // Arrange
-    mockListMeetings.mockResolvedValue([
-      {
-        name: 'Retro',
-        date: '2026-03-22',
-        time: '16:00',
-        has_transcript: true,
-        has_summary: false,
-        transcript_path: '/output/retro.md',
-        summary_path: '',
-        size_bytes: 256,
-      },
-    ]);
-    mockReadTranscript.mockResolvedValue('Retro content');
-
-    // Act
-    render(<MeetingsPage />);
-    await waitFor(() => {
-      expect(screen.getByText('Retro')).toBeInTheDocument();
-    });
-    fireEvent.click(screen.getByText('Retro'));
-    await waitFor(() => {
-      expect(screen.getByText('Back to Meetings')).toBeInTheDocument();
-    });
-    fireEvent.click(screen.getByText('Back to Meetings'));
-
-    // Assert
-    await waitFor(() => {
-      expect(screen.getByText('Meetings')).toBeInTheDocument();
-      expect(screen.getByText('Retro')).toBeInTheDocument();
-    });
+    const link = screen.getByText('Standup').closest('a');
+    expect(link).toHaveAttribute(
+      'href',
+      '/meetings/2026-03-22_14.00_Standup',
+    );
   });
 
   it('displays file sizes on meeting cards', async () => {
@@ -179,11 +126,43 @@ describe('MeetingsPage', () => {
     ]);
 
     // Act
-    render(<MeetingsPage />);
+    render(
+      <MemoryRouter>
+        <MeetingsPage />
+      </MemoryRouter>,
+    );
 
     // Assert
     await waitFor(() => {
       expect(screen.getByText('1.0 MB')).toBeInTheDocument();
+    });
+  });
+
+  it('shows summary badge when meeting has a summary', async () => {
+    // Arrange
+    mockListMeetings.mockResolvedValue([
+      {
+        name: 'Review',
+        date: '2026-03-22',
+        time: '09:00',
+        has_transcript: true,
+        has_summary: true,
+        transcript_path: '/output/review.md',
+        summary_path: '/output/review-summary.md',
+        size_bytes: 512,
+      },
+    ]);
+
+    // Act
+    render(
+      <MemoryRouter>
+        <MeetingsPage />
+      </MemoryRouter>,
+    );
+
+    // Assert
+    await waitFor(() => {
+      expect(screen.getByText('Summary')).toBeInTheDocument();
     });
   });
 });

@@ -1,21 +1,6 @@
 @use '../../styles' as *;
 
-// ── Page wrappers ───────────────────────────────
-
-// Fixed-height page for detail view (transcript fills remaining space)
-.fixedPage {
-  flex: 1;
-  min-height: 0;
-  max-width: $content-max-width;
-  width: 100%;
-  margin: 0 auto;
-  padding: $space-24;
-  display: flex;
-  flex-direction: column;
-  gap: $space-20;
-}
-
-// Scrollable page for list view (full-width scrollbar)
+// ── Page wrapper ────────────────────────────────
 .scrollPage {
   flex: 1;
   min-height: 0;
@@ -74,7 +59,8 @@
     background-color 0.2s,
     border-color 0.2s;
   text-align: left;
-  font-family: inherit;
+  text-decoration: none;
+  color: inherit;
   width: 100%;
 }
 
@@ -116,44 +102,7 @@
   color: $color-text-muted;
 }
 
-// ── Tab bar ────────────────────────────────────
-.tabBar {
-  display: flex;
-  gap: $space-4;
-}
-
-.tab {
-  padding: $space-8 $space-16;
-  font-size: $font-sm;
-  font-weight: $weight-semibold;
-  color: $color-text-secondary;
-  background: none;
-  border: $border-1 solid $color-border;
-  border-radius: $radius-8;
-  cursor: pointer;
-  font-family: inherit;
-  transition:
-    background-color 0.2s,
-    color 0.2s,
-    border-color 0.2s;
-}
-
-.tab:hover {
-  background-color: $color-hover;
-}
-
-.tabActive {
-  color: $color-text;
-  background-color: $color-surface;
-  border-color: $color-accent;
-}
-
-// ── Generate summary button ────────────────────
-.generateRow {
-  // no extra margin needed — gap on parent handles spacing
-}
-
-// ── Card badges ────────────────────────────────
+// ── Card badges ─────────────────────────────────
 .cardBadges {
   display: flex;
   align-items: baseline;
@@ -164,27 +113,4 @@
   font-size: $font-xs;
   font-weight: $weight-semibold;
   color: $color-success;
-}
-
-// ── Detail panel (fills remaining height) ───────
-.detailPanel {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-// ── Transcript / summary viewer ─────────────────
-.transcriptContent {
-  font-size: $font-sm;
-  color: $color-text;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: $font-sans;
-  line-height: 1.6;
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  margin: 0;
 }
