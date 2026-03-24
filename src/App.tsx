@@ -1,6 +1,6 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Layout } from './components/Layout';
-import { RecordingProvider } from './hooks/useRecording';
+import { RecordingProvider } from './hooks/RecordingProvider';
 import { ToastProvider } from './components/Toast';
 import { RecordingPage } from './pages/RecordingPage';
 import { SettingsPage } from './pages/SettingsPage';

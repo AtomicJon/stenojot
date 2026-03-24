@@ -1,35 +1,8 @@
-import { createContext, useCallback, useContext, useState } from 'react';
+import { useCallback, useState } from 'react';
 import type { ReactNode } from 'react';
 import s from './Toast.module.scss';
-
-/** Variant determines the visual style of the toast. */
-type ToastVariant = 'error' | 'success' | 'info';
-
-/** A single toast notification. */
-interface Toast {
-  id: number;
-  message: string;
-  variant: ToastVariant;
-}
-
-/** Shape of the toast context. */
-interface ToastContextValue {
-  /** Show a toast notification. Auto-dismisses after the given duration (default 6s). */
-  showToast: (
-    message: string,
-    variant?: ToastVariant,
-    durationMs?: number,
-  ) => void;
-}
-
-const ToastContext = createContext<ToastContextValue | null>(null);
-
-/** Access the toast notification system. Must be used within a ToastProvider. */
-export function useToast(): ToastContextValue {
-  const ctx = useContext(ToastContext);
-  if (!ctx) throw new Error('useToast must be used within ToastProvider');
-  return ctx;
-}
+import { ToastContext } from './useToast';
+import type { Toast, ToastVariant } from './useToast';
 
 let nextId = 0;
 
