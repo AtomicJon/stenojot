@@ -1,4 +1,4 @@
-# EchoNotes
+# StenoJot
 
 A desktop meeting transcription app built with Tauri v2, React, and TypeScript. Captures microphone and system audio, runs local Whisper transcription, and displays a live speaker-attributed transcript.
 

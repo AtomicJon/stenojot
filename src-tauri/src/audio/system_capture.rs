@@ -127,7 +127,7 @@ pub fn start_system_capture(source_name: &str) -> Result<SystemCaptureHandle, Ca
     // Verify we can connect to PulseAudio and the source exists
     let simple = Simple::new(
         None,
-        "EchoNotes",
+        "StenoJot",
         Direction::Record,
         Some(source.as_str()),
         "system-audio-capture",

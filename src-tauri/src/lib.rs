@@ -20,7 +20,7 @@ pub fn run() {
             let config_dir = app
                 .path()
                 .app_config_dir()
-                .unwrap_or_else(|_| PathBuf::from("/tmp/echonotes"));
+                .unwrap_or_else(|_| PathBuf::from("/tmp/stenojot"));
             std::fs::create_dir_all(&config_dir)
                 .expect("Failed to create app config directory");
 

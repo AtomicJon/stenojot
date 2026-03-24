@@ -42,7 +42,7 @@ pub struct AppState {
     pub system_channels: u16,
     /// App config directory for persisting settings.
     pub config_dir: PathBuf,
-    /// Custom output directory for transcript files (None = ~/EchoNotes/).
+    /// Custom output directory for transcript files (None = ~/StenoJot/).
     pub output_dir: Option<String>,
     /// Auto-stop silence timeout in seconds (None = disabled).
     pub silence_timeout_seconds: Option<u32>,
@@ -188,7 +188,7 @@ pub fn set_preferred_system_device(device_id: String, state: State<'_, Mutex<App
 
 /// Set and persist the output directory for transcript files.
 ///
-/// Pass an empty string to reset to the default (`~/EchoNotes/`).
+/// Pass an empty string to reset to the default (`~/StenoJot/`).
 #[tauri::command]
 pub fn set_output_dir(path: String, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
     let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;

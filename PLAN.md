@@ -1,10 +1,10 @@
-# EchoNotes — Architecture & Implementation Plan
+# StenoJot — Architecture & Implementation Plan
 
 A desktop meeting transcription app inspired by Granola.ai, built with Tauri v2 (Rust backend + React/TypeScript frontend).
 
 ## Product Vision
 
-EchoNotes captures system audio (remote participants) and microphone input (local user) during meetings, transcribes them in real-time, and provides an AI-enhanced notepad experience. Unlike bot-based tools, EchoNotes never joins the call — it captures audio directly from the device.
+StenoJot captures system audio (remote participants) and microphone input (local user) during meetings, transcribes them in real-time, and provides an AI-enhanced notepad experience. Unlike bot-based tools, StenoJot never joins the call — it captures audio directly from the device.
 
 ### Core Principles
 - **No meeting bot** — captures audio natively, invisible to other participants
@@ -33,7 +33,7 @@ Every meeting produces **two Markdown files**:
 
 Example output:
 ```
-~/EchoNotes/
+~/StenoJot/
   2026-03-21 14.00 Sprint Planning.md
   2026-03-21 14.00 Sprint Planning - Transcript.md
   2026-03-21 15.30 1-on-1 with Alex.md
@@ -71,7 +71,7 @@ Example output:
 14. Obsidian vault sync integration (configurable vault path, wikilinks, tags)
 15. Calendar integration (Google Calendar) for auto-detection & meeting titles
 16. Note templates (1:1, standup, retro, etc.) that shape the AI summary structure
-17. "Ask EchoNotes" post-meeting chat over transcript
+17. "Ask StenoJot" post-meeting chat over transcript
 18. Cloud transcription option (Deepgram/AssemblyAI) for higher accuracy
 19. Multi-speaker diarization within system audio
 20. Custom vocabulary / jargon support
@@ -227,7 +227,7 @@ async fn start_recording(
 
 Each meeting produces two files, named with an ISO 8601 date prefix and a meeting-specific name:
 ```
-~/EchoNotes/                                          # Configurable output directory
+~/StenoJot/                                          # Configurable output directory
   2026-03-21 14.00 Sprint Planning.md                       # AI-generated summary
   2026-03-21 14.00 Sprint Planning - Transcript.md          # Full transcript
   2026-03-21 15.30 1-on-1 with Alex.md
@@ -351,14 +351,14 @@ tempfile = "3"             # Isolated temp directories for file system tests
 - `TranscriptionWorker` runs on a dedicated `std::thread` (not tokio) to avoid blocking the async runtime during CPU-intensive Whisper inference.
 - Worker reads from ring buffer consumers, resamples via `pipeline::process_buffer()`, accumulates ~5s segments (80k samples at 16kHz), then runs Whisper `full()` on each segment independently for mic/system.
 - `AudioPipeline` struct removed — worker takes direct ownership of ring buffer consumers. `process_buffer()` and `is_speech()` remain as standalone functions.
-- Model management: models stored in `~/.local/share/echonotes/models/`, downloaded via `reqwest::blocking` from Hugging Face.
+- Model management: models stored in `~/.local/share/stenojot/models/`, downloaded via `reqwest::blocking` from Hugging Face.
 - Frontend uses Tauri `Channel` API — `startRecording` creates a channel and passes an `onTranscript` callback. Model download UI shown when model is not yet available.
 
 ### Phase 3: Markdown Output & Persistence ✅
 **Complexity: Medium | Focus: Producing useful output files**
 
 - [x] **3.1** Generate transcript Markdown file — full timestamped, speaker-labeled, created at recording start and updated periodically + on stop
-- [x] **3.2** Configurable output directory (default `~/EchoNotes/`) — settings UI with save/reset
+- [x] **3.2** Configurable output directory (default `~/StenoJot/`) — settings UI with save/reset
 - [x] **3.3** File naming: `YYYY-MM-DD HH.MM <Meeting Name> - Transcript.md` with fallback name resolution (`Meeting at HH-MM`)
 - [x] **3.4** Meeting list/browser view in the UI — reads from output directory, click to view transcript, live refresh via Tauri events
 - [x] **3.5** Auto-stop after configurable silence timeout — worker tracks silence duration, frontend detects via level polling
@@ -369,7 +369,7 @@ tempfile = "3"             # Isolated temp directories for file system tests
 - [x] **3.10** Settings persistence — mic/system device, gain, VAD threshold, models dir, output dir, silence timeout saved to `~/.config/` via `#[serde(default)]` JSON
 
 **Implementation notes:**
-- Settings stored as JSON in `app_config_dir()` (`~/.config/com.smashedtatoes.echonotes/settings.json`), loaded on startup via Tauri setup hook. Uses `#[serde(default)]` for forward-compatible deserialization — missing fields get defaults, unknown fields are ignored.
+- Settings stored as JSON in `app_config_dir()` (`~/.config/com.smashedtatoes.stenojot/settings.json`), loaded on startup via Tauri setup hook. Uses `#[serde(default)]` for forward-compatible deserialization — missing fields get defaults, unknown fields are ignored.
 - Transcript generation in `markdown.rs`: `write_transcript()` creates new files (used at recording start), `update_transcript()` rewrites existing files atomically (tmp+rename pattern) for periodic saves and final stop.
 - `TranscriptionWorker` maintains a shared `Arc<Mutex<Vec<TranscriptSegment>>>` that the worker thread pushes to alongside its local accumulator. The `save_current_transcript` command reads from this shared state.
 - Pause/resume uses an `Arc<AtomicBool>` in the worker. When paused, ring buffers are still drained (to prevent overflow) but samples are discarded. The silence timeout clock resets while paused to prevent false triggers.

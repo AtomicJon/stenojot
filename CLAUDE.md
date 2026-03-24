@@ -25,7 +25,7 @@ yarn test:tauri        # Rust backend tests only (cargo test)
 
 ## Architecture
 
-**EchoNotes** — a Tauri v2 desktop meeting transcription app. React/TypeScript frontend communicates with a Rust backend via Tauri's IPC bridge. See `PLAN.md` for the full product vision and implementation phases.
+**StenoJot** — a Tauri v2 desktop meeting transcription app. React/TypeScript frontend communicates with a Rust backend via Tauri's IPC bridge. See `PLAN.md` for the full product vision and implementation phases.
 
 ### Frontend → Backend flow
 

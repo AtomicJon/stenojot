@@ -405,7 +405,7 @@ export function SettingsPage() {
         {/* Output Directory */}
         <Panel title="Output Directory">
           <p className={s.sectionDesc}>
-            Where transcript files are saved. Defaults to ~/EchoNotes/.
+            Where transcript files are saved. Defaults to ~/StenoJot/.
           </p>
 
           <div className={s.pathInputRow}>
@@ -557,7 +557,7 @@ export function SettingsPage() {
                 setInitialPromptState(e.target.value);
                 setPromptSaved(false);
               }}
-              placeholder="e.g. Kubernetes, PostgreSQL, EchoNotes, Jon"
+              placeholder="e.g. Kubernetes, PostgreSQL, StenoJot, Jon"
             />
             <Button onClick={handleSavePrompt}>
               {promptSaved ? 'Saved' : 'Save'}

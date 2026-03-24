@@ -24,7 +24,7 @@ pub struct Settings {
     pub vad_threshold: f32,
     /// Custom models directory path (None = use default).
     pub models_dir: Option<String>,
-    /// Output directory for meeting transcript files (None = ~/EchoNotes/).
+    /// Output directory for meeting transcript files (None = ~/StenoJot/).
     pub output_dir: Option<String>,
     /// Auto-stop after this many seconds of silence (None = disabled).
     pub silence_timeout_seconds: Option<u32>,
@@ -78,10 +78,10 @@ impl Default for Settings {
 }
 
 /// Default output directory for transcript files.
-const DEFAULT_OUTPUT_DIR_NAME: &str = "EchoNotes";
+const DEFAULT_OUTPUT_DIR_NAME: &str = "StenoJot";
 
 impl Settings {
-    /// Resolve the output directory, defaulting to `~/EchoNotes/`.
+    /// Resolve the output directory, defaulting to `~/StenoJot/`.
     pub fn output_dir_resolved(&self) -> PathBuf {
         match &self.output_dir {
             Some(dir) if !dir.is_empty() => PathBuf::from(dir),

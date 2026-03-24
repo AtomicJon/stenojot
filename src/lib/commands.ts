@@ -149,7 +149,7 @@ export function setModelsDir(path: string): Promise<void> {
 
 /**
  * Set and persist the output directory for transcript files.
- * Pass an empty string to reset to the default (`~/EchoNotes/`).
+ * Pass an empty string to reset to the default (`~/StenoJot/`).
  * @param path - Absolute path to the output directory
  */
 export function setOutputDir(path: string): Promise<void> {

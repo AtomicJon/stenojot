@@ -46,7 +46,7 @@ export function Layout() {
       <div className={s.navOuter}>
         <nav className={s.nav}>
           <Link to="/" className={s.navBrand}>
-            EchoNotes
+            StenoJot
           </Link>
           <div className={s.navRight}>
             {isRecording && !isOnRecordingPage && (

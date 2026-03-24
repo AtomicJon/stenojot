@@ -1,6 +1,6 @@
 //! Markdown transcript file generation and meeting listing.
 //!
-//! Formats transcript segments into the EchoNotes Markdown format and writes
+//! Formats transcript segments into the StenoJot Markdown format and writes
 //! them to the configured output directory. Also provides meeting listing by
 //! parsing transcript filenames from the output directory.
 

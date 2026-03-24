@@ -2,7 +2,7 @@
 //!
 //! Contains system and user prompt constants used by the summary orchestration
 //! layer. Prompts are designed to produce structured Markdown output that
-//! matches the EchoNotes summary file format.
+//! matches the StenoJot summary file format.
 
 /// System prompt for single-pass or first-chunk meeting summarization.
 pub const SUMMARY_SYSTEM: &str = "\

@@ -1,7 +1,7 @@
 //! Whisper model management: storage paths, existence checks, and downloads.
 //!
 //! Models are stored in a configurable directory (defaulting to
-//! `~/.local/share/echonotes/models/`) and downloaded from Hugging Face on
+//! `~/.local/share/stenojot/models/`) and downloaded from Hugging Face on
 //! first use. The storage location can be overridden at runtime via
 //! [`set_models_dir`] and reset back to the default with [`reset_models_dir`].
 
@@ -57,7 +57,7 @@ pub fn reset_models_dir() {
 /// Returns the directory where Whisper models are stored.
 ///
 /// Uses the custom directory if one has been set via [`set_models_dir`],
-/// otherwise falls back to `~/.local/share/echonotes/models/`.
+/// otherwise falls back to `~/.local/share/stenojot/models/`.
 pub fn get_models_dir() -> PathBuf {
     if let Ok(dir) = CUSTOM_MODELS_DIR.lock() {
         if let Some(ref custom) = *dir {
@@ -76,9 +76,9 @@ pub fn get_custom_models_dir() -> Option<PathBuf> {
     None
 }
 
-/// Returns the default models directory (`~/.local/share/echonotes/models/`).
+/// Returns the default models directory (`~/.local/share/stenojot/models/`).
 fn default_models_dir() -> PathBuf {
-    dirs_like_home().join(".local/share/echonotes/models")
+    dirs_like_home().join(".local/share/stenojot/models")
 }
 
 /// Best-effort home directory lookup; falls back to `/tmp`.
