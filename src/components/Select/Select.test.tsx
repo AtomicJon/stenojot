@@ -1,16 +1,16 @@
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
-import { Select } from "./Select";
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen, fireEvent } from '@testing-library/react';
+import { Select } from './Select';
 
 const options = [
-  { value: "mic-1", label: "Built-in Microphone" },
-  { value: "mic-2", label: "USB Microphone" },
+  { value: 'mic-1', label: 'Built-in Microphone' },
+  { value: 'mic-2', label: 'USB Microphone' },
 ];
 
-describe("Select", () => {
-  it("renders the label text", () => {
+describe('Select', () => {
+  it('renders the label text', () => {
     // Arrange
-    const label = "Microphone";
+    const label = 'Microphone';
 
     // Act
     render(
@@ -26,7 +26,7 @@ describe("Select", () => {
     expect(screen.getByText(label)).toBeInTheDocument();
   });
 
-  it("renders all options", () => {
+  it('renders all options', () => {
     // Arrange & Act
     render(
       <Select
@@ -38,13 +38,13 @@ describe("Select", () => {
     );
 
     // Assert
-    const opts = screen.getAllByRole("option");
+    const opts = screen.getAllByRole('option');
     expect(opts).toHaveLength(2);
-    expect(opts[0]).toHaveTextContent("Built-in Microphone");
-    expect(opts[1]).toHaveTextContent("USB Microphone");
+    expect(opts[0]).toHaveTextContent('Built-in Microphone');
+    expect(opts[1]).toHaveTextContent('USB Microphone');
   });
 
-  it("selects the provided value", () => {
+  it('selects the provided value', () => {
     // Arrange & Act
     render(
       <Select
@@ -56,11 +56,11 @@ describe("Select", () => {
     );
 
     // Assert
-    const select = screen.getByRole("combobox");
-    expect(select).toHaveValue("mic-2");
+    const select = screen.getByRole('combobox');
+    expect(select).toHaveValue('mic-2');
   });
 
-  it("calls onChange with the new value on selection", () => {
+  it('calls onChange with the new value on selection', () => {
     // Arrange
     const handleChange = vi.fn();
     render(
@@ -73,15 +73,15 @@ describe("Select", () => {
     );
 
     // Act
-    fireEvent.change(screen.getByRole("combobox"), {
-      target: { value: "mic-2" },
+    fireEvent.change(screen.getByRole('combobox'), {
+      target: { value: 'mic-2' },
     });
 
     // Assert
-    expect(handleChange).toHaveBeenCalledWith("mic-2");
+    expect(handleChange).toHaveBeenCalledWith('mic-2');
   });
 
-  it("disables the select when disabled prop is true", () => {
+  it('disables the select when disabled prop is true', () => {
     // Arrange & Act
     render(
       <Select
@@ -94,6 +94,6 @@ describe("Select", () => {
     );
 
     // Assert
-    expect(screen.getByRole("combobox")).toBeDisabled();
+    expect(screen.getByRole('combobox')).toBeDisabled();
   });
 });

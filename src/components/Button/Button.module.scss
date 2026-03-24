@@ -1,4 +1,4 @@
-@use "../../styles" as *;
+@use '../../styles' as *;
 
 .button {
   padding: $space-10 $space-20;
@@ -8,7 +8,9 @@
   border: none;
   border-radius: $radius-8;
   cursor: pointer;
-  transition: background-color 0.2s, color 0.2s;
+  transition:
+    background-color 0.2s,
+    color 0.2s;
 }
 
 .button:disabled {

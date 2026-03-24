@@ -11,7 +11,11 @@
     "test": "vitest run && cargo test --manifest-path src-tauri/Cargo.toml",
     "test:ui": "vitest run",
     "test:ui:watch": "vitest",
-    "test:tauri": "cargo test --manifest-path src-tauri/Cargo.toml"
+    "test:tauri": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "release": "node scripts/release.mjs",
+    "format": "prettier --write 'src/**/*.{ts,tsx,scss}' '*.json'",
+    "format:check": "prettier --check 'src/**/*.{ts,tsx,scss}' '*.json'",
+    "lint": "eslint . && tsc --noEmit"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
@@ -22,6 +26,7 @@
     "sass": "^1.98.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@tauri-apps/cli": "^2",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",
@@ -29,8 +34,14 @@
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
+    "eslint": "^10.1.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
     "jsdom": "^29.0.1",
+    "prettier": "^3.8.1",
     "typescript": "~5.8.3",
+    "typescript-eslint": "^8.57.2",
     "vite": "^7.0.4",
     "vitest": "^3"
   }

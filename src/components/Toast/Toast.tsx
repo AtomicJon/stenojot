@@ -1,9 +1,9 @@
-import { createContext, useCallback, useContext, useState } from "react";
-import type { ReactNode } from "react";
-import s from "./Toast.module.scss";
+import { createContext, useCallback, useContext, useState } from 'react';
+import type { ReactNode } from 'react';
+import s from './Toast.module.scss';
 
 /** Variant determines the visual style of the toast. */
-type ToastVariant = "error" | "success" | "info";
+type ToastVariant = 'error' | 'success' | 'info';
 
 /** A single toast notification. */
 interface Toast {
@@ -15,7 +15,11 @@ interface Toast {
 /** Shape of the toast context. */
 interface ToastContextValue {
   /** Show a toast notification. Auto-dismisses after the given duration (default 6s). */
-  showToast: (message: string, variant?: ToastVariant, durationMs?: number) => void;
+  showToast: (
+    message: string,
+    variant?: ToastVariant,
+    durationMs?: number,
+  ) => void;
 }
 
 const ToastContext = createContext<ToastContextValue | null>(null);
@@ -23,7 +27,7 @@ const ToastContext = createContext<ToastContextValue | null>(null);
 /** Access the toast notification system. Must be used within a ToastProvider. */
 export function useToast(): ToastContextValue {
   const ctx = useContext(ToastContext);
-  if (!ctx) throw new Error("useToast must be used within ToastProvider");
+  if (!ctx) throw new Error('useToast must be used within ToastProvider');
   return ctx;
 }
 
@@ -43,21 +47,21 @@ export function ToastProvider({ children }: ToastProviderProps) {
   }, []);
 
   const showToast = useCallback(
-    (message: string, variant: ToastVariant = "info", durationMs = 6000) => {
+    (message: string, variant: ToastVariant = 'info', durationMs = 6000) => {
       const id = nextId++;
       setToasts((prev) => [...prev, { id, message, variant }]);
       setTimeout(() => dismiss(id), durationMs);
     },
-    [dismiss]
+    [dismiss],
   );
 
   const variantClass = (variant: ToastVariant) => {
     switch (variant) {
-      case "error":
+      case 'error':
         return s.toastError;
-      case "success":
+      case 'success':
         return s.toastSuccess;
-      case "info":
+      case 'info':
         return s.toastInfo;
     }
   };

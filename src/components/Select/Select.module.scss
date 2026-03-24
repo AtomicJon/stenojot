@@ -1,4 +1,4 @@
-@use "../../styles" as *;
+@use '../../styles' as *;
 
 .wrapper {
   display: flex;
@@ -27,7 +27,9 @@
   background-repeat: no-repeat;
   background-position: right $space-12 center;
   padding-right: $space-32;
-  transition: border-color 0.2s, opacity 0.2s;
+  transition:
+    border-color 0.2s,
+    opacity 0.2s;
 }
 
 .select:hover:not(:disabled) {

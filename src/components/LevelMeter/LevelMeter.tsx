@@ -1,5 +1,5 @@
-import { getLevelPercent } from "../../lib/audio";
-import s from "./LevelMeter.module.scss";
+import { getLevelPercent } from '../../lib/audio';
+import s from './LevelMeter.module.scss';
 
 /** Props for the LevelMeter component. */
 interface LevelMeterProps {
@@ -20,10 +20,7 @@ export function LevelMeter({ label, rms, thresholdRms }: LevelMeterProps) {
     <div className={s.row}>
       <span className={s.label}>{label}</span>
       <div className={s.track}>
-        <div
-          className={`${s.fill} ${variant}`}
-          style={{ width: `${pct}%` }}
-        />
+        <div className={`${s.fill} ${variant}`} style={{ width: `${pct}%` }} />
         {thresholdRms !== undefined && (
           <div
             className={s.threshold}

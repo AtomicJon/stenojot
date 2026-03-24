@@ -1,32 +1,32 @@
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
-import { Button } from "./Button";
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen, fireEvent } from '@testing-library/react';
+import { Button } from './Button';
 
-describe("Button", () => {
-  it("renders children text", () => {
+describe('Button', () => {
+  it('renders children text', () => {
     // Arrange
-    const label = "Click me";
+    const label = 'Click me';
 
     // Act
     render(<Button onClick={() => {}}>{label}</Button>);
 
     // Assert
-    expect(screen.getByRole("button")).toHaveTextContent(label);
+    expect(screen.getByRole('button')).toHaveTextContent(label);
   });
 
-  it("calls onClick when clicked", () => {
+  it('calls onClick when clicked', () => {
     // Arrange
     const handleClick = vi.fn();
     render(<Button onClick={handleClick}>Go</Button>);
 
     // Act
-    fireEvent.click(screen.getByRole("button"));
+    fireEvent.click(screen.getByRole('button'));
 
     // Assert
     expect(handleClick).toHaveBeenCalledOnce();
   });
 
-  it("does not fire onClick when disabled", () => {
+  it('does not fire onClick when disabled', () => {
     // Arrange
     const handleClick = vi.fn();
     render(
@@ -36,21 +36,21 @@ describe("Button", () => {
     );
 
     // Act
-    fireEvent.click(screen.getByRole("button"));
+    fireEvent.click(screen.getByRole('button'));
 
     // Assert
     expect(handleClick).not.toHaveBeenCalled();
   });
 
-  it("applies the accent variant class by default", () => {
+  it('applies the accent variant class by default', () => {
     // Arrange & Act
     render(<Button onClick={() => {}}>OK</Button>);
 
     // Assert
-    expect(screen.getByRole("button")).toHaveClass("accent");
+    expect(screen.getByRole('button')).toHaveClass('accent');
   });
 
-  it("applies the danger variant class", () => {
+  it('applies the danger variant class', () => {
     // Arrange & Act
     render(
       <Button onClick={() => {}} variant="danger">
@@ -59,10 +59,10 @@ describe("Button", () => {
     );
 
     // Assert
-    expect(screen.getByRole("button")).toHaveClass("danger");
+    expect(screen.getByRole('button')).toHaveClass('danger');
   });
 
-  it("applies the link variant class", () => {
+  it('applies the link variant class', () => {
     // Arrange & Act
     render(
       <Button onClick={() => {}} variant="link">
@@ -71,6 +71,6 @@ describe("Button", () => {
     );
 
     // Assert
-    expect(screen.getByRole("button")).toHaveClass("link");
+    expect(screen.getByRole('button')).toHaveClass('link');
   });
 });

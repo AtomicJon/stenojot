@@ -1,4 +1,4 @@
-import s from "./Slider.module.scss";
+import s from './Slider.module.scss';
 
 /** Props for the Slider component. */
 interface SliderProps {
@@ -17,7 +17,14 @@ interface SliderProps {
 }
 
 /** Labeled range slider input. */
-export function Slider({ label, value, min, max, step, onChange }: SliderProps) {
+export function Slider({
+  label,
+  value,
+  min,
+  max,
+  step,
+  onChange,
+}: SliderProps) {
   return (
     <label className={s.wrapper}>
       <span className={s.label}>{label}</span>

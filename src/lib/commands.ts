@@ -1,4 +1,4 @@
-import { invoke, Channel } from "@tauri-apps/api/core";
+import { invoke, Channel } from '@tauri-apps/api/core';
 import type {
   AudioDevice,
   AudioLevels,
@@ -8,16 +8,16 @@ import type {
   StartRecordingResult,
   StopRecordingResult,
   TranscriptSegment,
-} from "../types";
+} from '../types';
 
 /** List available microphone input devices (via cpal/ALSA). */
 export function getAudioDevices(): Promise<AudioDevice[]> {
-  return invoke<AudioDevice[]>("get_audio_devices");
+  return invoke<AudioDevice[]>('get_audio_devices');
 }
 
 /** List available system audio monitor sources (via PulseAudio/PipeWire). */
 export function getSystemAudioDevices(): Promise<AudioDevice[]> {
-  return invoke<AudioDevice[]>("get_system_audio_devices");
+  return invoke<AudioDevice[]>('get_system_audio_devices');
 }
 
 /**
@@ -30,11 +30,11 @@ export function getSystemAudioDevices(): Promise<AudioDevice[]> {
 export function startRecording(
   micDeviceId: string,
   systemDeviceId: string,
-  onTranscript: (segment: TranscriptSegment) => void
+  onTranscript: (segment: TranscriptSegment) => void,
 ): Promise<StartRecordingResult> {
   const channel = new Channel<TranscriptSegment>();
   channel.onmessage = onTranscript;
-  return invoke<StartRecordingResult>("start_recording", {
+  return invoke<StartRecordingResult>('start_recording', {
     micDeviceId,
     systemDeviceId,
     onTranscript: channel,
@@ -43,27 +43,27 @@ export function startRecording(
 
 /** Pause the current recording session. Audio is discarded while paused. */
 export function pauseRecording(): Promise<void> {
-  return invoke("pause_recording");
+  return invoke('pause_recording');
 }
 
 /** Resume a paused recording session. */
 export function resumeRecording(): Promise<void> {
-  return invoke("resume_recording");
+  return invoke('resume_recording');
 }
 
 /** Save the current transcript to disk (periodic save during recording). */
 export function saveCurrentTranscript(): Promise<number> {
-  return invoke<number>("save_current_transcript");
+  return invoke<number>('save_current_transcript');
 }
 
 /** Stop the current recording and return transcript info. */
 export function stopRecording(): Promise<StopRecordingResult> {
-  return invoke<StopRecordingResult>("stop_recording");
+  return invoke<StopRecordingResult>('stop_recording');
 }
 
 /** Get current audio RMS levels for both streams. */
 export function getAudioLevels(): Promise<AudioLevels> {
-  return invoke<AudioLevels>("get_audio_levels");
+  return invoke<AudioLevels>('get_audio_levels');
 }
 
 /**
@@ -71,12 +71,12 @@ export function getAudioLevels(): Promise<AudioLevels> {
  * @param gain - Gain multiplier (1.0 = unity, 2.0 = double volume)
  */
 export function setMicGain(gain: number): Promise<void> {
-  return invoke("set_mic_gain", { gain });
+  return invoke('set_mic_gain', { gain });
 }
 
 /** Get the current microphone gain multiplier. */
 export function getMicGain(): Promise<number> {
-  return invoke<number>("get_mic_gain");
+  return invoke<number>('get_mic_gain');
 }
 
 /**
@@ -85,17 +85,17 @@ export function getMicGain(): Promise<number> {
  * @param threshold - RMS threshold value
  */
 export function setVadThreshold(threshold: number): Promise<void> {
-  return invoke("set_vad_threshold", { threshold });
+  return invoke('set_vad_threshold', { threshold });
 }
 
 /** Get the current VAD sensitivity threshold. */
 export function getVadThreshold(): Promise<number> {
-  return invoke<number>("get_vad_threshold");
+  return invoke<number>('get_vad_threshold');
 }
 
 /** Retrieve persisted application settings from disk. */
 export function getSettings(): Promise<PersistedSettings> {
-  return invoke<PersistedSettings>("get_settings");
+  return invoke<PersistedSettings>('get_settings');
 }
 
 /**
@@ -103,7 +103,7 @@ export function getSettings(): Promise<PersistedSettings> {
  * @param deviceId - ID of the preferred microphone device
  */
 export function setPreferredMic(deviceId: string): Promise<void> {
-  return invoke("set_preferred_mic", { deviceId });
+  return invoke('set_preferred_mic', { deviceId });
 }
 
 /**
@@ -111,12 +111,12 @@ export function setPreferredMic(deviceId: string): Promise<void> {
  * @param deviceId - ID of the preferred system audio monitor source
  */
 export function setPreferredSystemDevice(deviceId: string): Promise<void> {
-  return invoke("set_preferred_system_device", { deviceId });
+  return invoke('set_preferred_system_device', { deviceId });
 }
 
 /** Retrieve detailed information about the Whisper transcription model. */
 export function getModelInfo(): Promise<ModelInfo> {
-  return invoke<ModelInfo>("get_model_info");
+  return invoke<ModelInfo>('get_model_info');
 }
 
 /**
@@ -130,12 +130,12 @@ export async function checkModelStatus(): Promise<boolean> {
 
 /** Download the Whisper transcription model. */
 export function downloadModel(): Promise<void> {
-  return invoke("download_model");
+  return invoke('download_model');
 }
 
 /** Delete the Whisper transcription model file. */
 export function deleteModel(): Promise<void> {
-  return invoke("delete_model");
+  return invoke('delete_model');
 }
 
 /**
@@ -144,7 +144,7 @@ export function deleteModel(): Promise<void> {
  * @param path - Absolute path to the custom models directory
  */
 export function setModelsDir(path: string): Promise<void> {
-  return invoke("set_models_dir", { path });
+  return invoke('set_models_dir', { path });
 }
 
 /**
@@ -153,12 +153,12 @@ export function setModelsDir(path: string): Promise<void> {
  * @param path - Absolute path to the output directory
  */
 export function setOutputDir(path: string): Promise<void> {
-  return invoke("set_output_dir", { path });
+  return invoke('set_output_dir', { path });
 }
 
 /** Get the resolved output directory path. */
 export function getOutputDir(): Promise<string> {
-  return invoke<string>("get_output_dir");
+  return invoke<string>('get_output_dir');
 }
 
 /**
@@ -167,7 +167,7 @@ export function getOutputDir(): Promise<string> {
  * @param seconds - Timeout in seconds (0 = disabled)
  */
 export function setSilenceTimeout(seconds: number): Promise<void> {
-  return invoke("set_silence_timeout", { seconds });
+  return invoke('set_silence_timeout', { seconds });
 }
 
 /**
@@ -175,7 +175,7 @@ export function setSilenceTimeout(seconds: number): Promise<void> {
  * @param model - Model name (e.g. "tiny", "base", "small", "medium")
  */
 export function setWhisperModel(model: string): Promise<void> {
-  return invoke("set_whisper_model", { model });
+  return invoke('set_whisper_model', { model });
 }
 
 /**
@@ -185,7 +185,7 @@ export function setWhisperModel(model: string): Promise<void> {
  * @param prompt - Initial prompt text
  */
 export function setInitialPrompt(prompt: string): Promise<void> {
-  return invoke("set_initial_prompt", { prompt });
+  return invoke('set_initial_prompt', { prompt });
 }
 
 /**
@@ -194,12 +194,12 @@ export function setInitialPrompt(prompt: string): Promise<void> {
  * @param seconds - Maximum segment duration
  */
 export function setMaxSegmentSeconds(seconds: number): Promise<void> {
-  return invoke("set_max_segment_seconds", { seconds });
+  return invoke('set_max_segment_seconds', { seconds });
 }
 
 /** List meetings in the output directory. */
 export function listMeetings(): Promise<MeetingEntry[]> {
-  return invoke<MeetingEntry[]>("list_meetings");
+  return invoke<MeetingEntry[]>('list_meetings');
 }
 
 /**
@@ -207,7 +207,7 @@ export function listMeetings(): Promise<MeetingEntry[]> {
  * @param path - Absolute path to the transcript file
  */
 export function readMeetingTranscript(path: string): Promise<string> {
-  return invoke<string>("read_meeting_transcript", { path });
+  return invoke<string>('read_meeting_transcript', { path });
 }
 
 /**
@@ -215,7 +215,7 @@ export function readMeetingTranscript(path: string): Promise<string> {
  * @param provider - Provider identifier ("ollama", "anthropic", "openai")
  */
 export function setLlmProvider(provider: string): Promise<void> {
-  return invoke("set_llm_provider", { provider });
+  return invoke('set_llm_provider', { provider });
 }
 
 /**
@@ -224,7 +224,7 @@ export function setLlmProvider(provider: string): Promise<void> {
  * @param model - Model name
  */
 export function setLlmModel(model: string): Promise<void> {
-  return invoke("set_llm_model", { model });
+  return invoke('set_llm_model', { model });
 }
 
 /**
@@ -233,7 +233,7 @@ export function setLlmModel(model: string): Promise<void> {
  * @param key - API key
  */
 export function setLlmApiKey(key: string): Promise<void> {
-  return invoke("set_llm_api_key", { key });
+  return invoke('set_llm_api_key', { key });
 }
 
 /**
@@ -242,7 +242,7 @@ export function setLlmApiKey(key: string): Promise<void> {
  * @param url - Custom base URL
  */
 export function setLlmBaseUrl(url: string): Promise<void> {
-  return invoke("set_llm_base_url", { url });
+  return invoke('set_llm_base_url', { url });
 }
 
 /**
@@ -250,7 +250,7 @@ export function setLlmBaseUrl(url: string): Promise<void> {
  * @param enabled - Whether auto-summary is enabled
  */
 export function setAutoSummary(enabled: boolean): Promise<void> {
-  return invoke("set_auto_summary", { enabled });
+  return invoke('set_auto_summary', { enabled });
 }
 
 /**
@@ -259,7 +259,7 @@ export function setAutoSummary(enabled: boolean): Promise<void> {
  * @param transcriptPath - Absolute path to the transcript file
  */
 export function generateSummary(transcriptPath: string): Promise<void> {
-  return invoke("generate_summary", { transcriptPath });
+  return invoke('generate_summary', { transcriptPath });
 }
 
 /**
@@ -267,5 +267,5 @@ export function generateSummary(transcriptPath: string): Promise<void> {
  * @param path - Absolute path to the summary file
  */
 export function readMeetingSummary(path: string): Promise<string> {
-  return invoke<string>("read_meeting_summary", { path });
+  return invoke<string>('read_meeting_summary', { path });
 }

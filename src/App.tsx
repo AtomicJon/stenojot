@@ -1,11 +1,11 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import { Layout } from "./components/Layout";
-import { RecordingProvider } from "./hooks/useRecording";
-import { ToastProvider } from "./components/Toast";
-import { RecordingPage } from "./pages/RecordingPage";
-import { SettingsPage } from "./pages/SettingsPage";
-import { MeetingsPage } from "./pages/MeetingsPage";
-import "./global.scss";
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { Layout } from './components/Layout';
+import { RecordingProvider } from './hooks/useRecording';
+import { ToastProvider } from './components/Toast';
+import { RecordingPage } from './pages/RecordingPage';
+import { SettingsPage } from './pages/SettingsPage';
+import { MeetingsPage } from './pages/MeetingsPage';
+import './global.scss';
 
 function App() {
   return (

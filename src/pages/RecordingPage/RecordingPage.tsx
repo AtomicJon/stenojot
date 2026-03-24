@@ -1,12 +1,12 @@
-import { useEffect, useRef } from "react";
-import { Link } from "react-router-dom";
-import { useRecording } from "../../hooks/useRecording";
-import { getLevelPercent, rmsFromPercent } from "../../lib/audio";
-import { formatTimestamp } from "../../lib/format";
-import { LevelMeter } from "../../components/LevelMeter";
-import { Panel } from "../../components/Panel";
-import { Slider } from "../../components/Slider";
-import s from "./RecordingPage.module.scss";
+import { useEffect, useRef } from 'react';
+import { Link } from 'react-router-dom';
+import { useRecording } from '../../hooks/useRecording';
+import { getLevelPercent, rmsFromPercent } from '../../lib/audio';
+import { formatTimestamp } from '../../lib/format';
+import { LevelMeter } from '../../components/LevelMeter';
+import { Panel } from '../../components/Panel';
+import { Slider } from '../../components/Slider';
+import s from './RecordingPage.module.scss';
 
 /** Recording page with audio level meters, tuning controls, and live transcript. */
 export function RecordingPage() {
@@ -25,7 +25,7 @@ export function RecordingPage() {
 
   // Auto-scroll transcript to bottom when new segments arrive
   useEffect(() => {
-    transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [segments]);
 
   return (
@@ -81,15 +81,15 @@ export function RecordingPage() {
         {segments.length === 0 ? (
           <div className={s.transcriptPlaceholder}>
             {isRecording
-              ? "Listening for speech..."
-              : "Transcript will appear here during recording..."}
+              ? 'Listening for speech...'
+              : 'Transcript will appear here during recording...'}
           </div>
         ) : (
           <div className={s.transcriptList}>
             {segments.map((seg, i) => (
               <div
                 key={`${seg.start_ms}-${i}`}
-                className={`${s.segment} ${seg.speaker === "Me" ? s.segmentMe : s.segmentOthers}`}
+                className={`${s.segment} ${seg.speaker === 'Me' ? s.segmentMe : s.segmentOthers}`}
               >
                 <div className={s.segmentHeader}>
                   <span className={s.segmentTimestamp}>

@@ -1,1 +1,1 @@
-export { RecordingPage } from "./RecordingPage";
+export { RecordingPage } from './RecordingPage';

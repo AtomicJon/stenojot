@@ -1,5 +1,5 @@
-import type { ReactNode } from "react";
-import s from "./Panel.module.scss";
+import type { ReactNode } from 'react';
+import s from './Panel.module.scss';
 
 /** Props for the Panel component. */
 interface PanelProps {
@@ -14,7 +14,7 @@ interface PanelProps {
 /** Styled section container with optional title heading. */
 export function Panel({ title, children, className }: PanelProps) {
   return (
-    <section className={`${s.panel} ${className ?? ""}`}>
+    <section className={`${s.panel} ${className ?? ''}`}>
       {title && <h2 className={s.title}>{title}</h2>}
       {children}
     </section>

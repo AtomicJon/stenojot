@@ -1,5 +1,5 @@
-import type { ReactNode } from "react";
-import s from "./Button.module.scss";
+import type { ReactNode } from 'react';
+import s from './Button.module.scss';
 
 /** Props for the Button component. */
 interface ButtonProps {
@@ -8,7 +8,7 @@ interface ButtonProps {
   /** Called when the button is clicked. */
   onClick: () => void;
   /** Visual style variant. */
-  variant?: "accent" | "danger" | "link";
+  variant?: 'accent' | 'danger' | 'link';
   /** Whether the button is disabled. */
   disabled?: boolean;
 }
@@ -17,15 +17,11 @@ interface ButtonProps {
 export function Button({
   children,
   onClick,
-  variant = "accent",
+  variant = 'accent',
   disabled,
 }: ButtonProps) {
   const variantClass =
-    variant === "danger"
-      ? s.danger
-      : variant === "link"
-        ? s.link
-        : s.accent;
+    variant === 'danger' ? s.danger : variant === 'link' ? s.link : s.accent;
 
   return (
     <button

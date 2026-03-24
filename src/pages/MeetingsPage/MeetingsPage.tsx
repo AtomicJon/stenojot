@@ -1,28 +1,28 @@
-import { useState, useEffect, useCallback } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { useState, useEffect, useCallback } from 'react';
+import { listen } from '@tauri-apps/api/event';
 import {
   listMeetings,
   readMeetingTranscript,
   readMeetingSummary,
   generateSummary,
-} from "../../lib/commands";
-import { formatFileSize } from "../../lib/format";
-import { Button } from "../../components/Button";
-import { Panel } from "../../components/Panel";
-import type { MeetingEntry } from "../../types";
-import s from "./MeetingsPage.module.scss";
+} from '../../lib/commands';
+import { formatFileSize } from '../../lib/format';
+import { Button } from '../../components/Button';
+import { Panel } from '../../components/Panel';
+import type { MeetingEntry } from '../../types';
+import s from './MeetingsPage.module.scss';
 
 /** Which view tab is active in the detail viewer. */
-type ViewTab = "summary" | "transcript";
+type ViewTab = 'summary' | 'transcript';
 
 /** Page for browsing past meeting transcripts and summaries. */
 export function MeetingsPage() {
   const [meetings, setMeetings] = useState<MeetingEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedMeeting, setSelectedMeeting] = useState<MeetingEntry | null>(
-    null
+    null,
   );
-  const [viewTab, setViewTab] = useState<ViewTab>("summary");
+  const [viewTab, setViewTab] = useState<ViewTab>('summary');
   const [content, setContent] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
 
@@ -31,7 +31,7 @@ export function MeetingsPage() {
       const list = await listMeetings();
       setMeetings(list);
     } catch (err) {
-      console.error("Failed to list meetings:", err);
+      console.error('Failed to list meetings:', err);
     } finally {
       setLoading(false);
     }
@@ -43,18 +43,18 @@ export function MeetingsPage() {
 
   // Refresh when backend emits meetings-changed event
   useEffect(() => {
-    const unlistenMeetings = listen("meetings-changed", () => {
+    const unlistenMeetings = listen('meetings-changed', () => {
       loadMeetings();
     });
-    const unlistenSummary = listen("summary-generated", () => {
+    const unlistenSummary = listen('summary-generated', () => {
       loadMeetings();
       setGenerating(false);
     });
-    const unlistenError = listen("summary-error", (event) => {
-      console.error("Summary generation failed:", event.payload);
+    const unlistenError = listen('summary-error', (event) => {
+      console.error('Summary generation failed:', event.payload);
       setGenerating(false);
     });
-    const unlistenGenerating = listen("summary-generating", () => {
+    const unlistenGenerating = listen('summary-generating', () => {
       setGenerating(true);
     });
     return () => {
@@ -66,24 +66,21 @@ export function MeetingsPage() {
   }, [loadMeetings]);
 
   /** Open a meeting's content for reading. */
-  const handleOpen = useCallback(
-    async (meeting: MeetingEntry) => {
-      setSelectedMeeting(meeting);
-      const tab = meeting.has_summary ? "summary" : "transcript";
-      setViewTab(tab);
-      try {
-        const text =
-          tab === "summary" && meeting.has_summary
-            ? await readMeetingSummary(meeting.summary_path)
-            : await readMeetingTranscript(meeting.transcript_path);
-        setContent(text);
-      } catch (err) {
-        console.error("Failed to read meeting file:", err);
-        setContent("Failed to load file.");
-      }
-    },
-    []
-  );
+  const handleOpen = useCallback(async (meeting: MeetingEntry) => {
+    setSelectedMeeting(meeting);
+    const tab = meeting.has_summary ? 'summary' : 'transcript';
+    setViewTab(tab);
+    try {
+      const text =
+        tab === 'summary' && meeting.has_summary
+          ? await readMeetingSummary(meeting.summary_path)
+          : await readMeetingTranscript(meeting.transcript_path);
+      setContent(text);
+    } catch (err) {
+      console.error('Failed to read meeting file:', err);
+      setContent('Failed to load file.');
+    }
+  }, []);
 
   /** Switch between summary and transcript tabs. */
   const handleTabChange = useCallback(
@@ -93,16 +90,16 @@ export function MeetingsPage() {
       setContent(null);
       try {
         const text =
-          tab === "summary" && selectedMeeting.has_summary
+          tab === 'summary' && selectedMeeting.has_summary
             ? await readMeetingSummary(selectedMeeting.summary_path)
             : await readMeetingTranscript(selectedMeeting.transcript_path);
         setContent(text);
       } catch (err) {
-        console.error("Failed to read meeting file:", err);
-        setContent("Failed to load file.");
+        console.error('Failed to read meeting file:', err);
+        setContent('Failed to load file.');
       }
     },
-    [selectedMeeting]
+    [selectedMeeting],
   );
 
   /** Go back to the meeting list. */
@@ -118,7 +115,7 @@ export function MeetingsPage() {
     try {
       await generateSummary(selectedMeeting.transcript_path);
     } catch (err) {
-      console.error("Failed to trigger summary generation:", err);
+      console.error('Failed to trigger summary generation:', err);
       setGenerating(false);
     }
   }, [selectedMeeting]);
@@ -137,14 +134,14 @@ export function MeetingsPage() {
         {selectedMeeting.has_summary && (
           <div className={s.tabBar}>
             <button
-              className={`${s.tab} ${viewTab === "summary" ? s.tabActive : ""}`}
-              onClick={() => handleTabChange("summary")}
+              className={`${s.tab} ${viewTab === 'summary' ? s.tabActive : ''}`}
+              onClick={() => handleTabChange('summary')}
             >
               Summary
             </button>
             <button
-              className={`${s.tab} ${viewTab === "transcript" ? s.tabActive : ""}`}
-              onClick={() => handleTabChange("transcript")}
+              className={`${s.tab} ${viewTab === 'transcript' ? s.tabActive : ''}`}
+              onClick={() => handleTabChange('transcript')}
             >
               Transcript
             </button>
@@ -155,7 +152,7 @@ export function MeetingsPage() {
         {!selectedMeeting.has_summary && (
           <div className={s.generateRow}>
             <Button onClick={handleGenerateSummary} disabled={generating}>
-              {generating ? "Generating Summary..." : "Generate Summary"}
+              {generating ? 'Generating Summary...' : 'Generate Summary'}
             </Button>
           </div>
         )}

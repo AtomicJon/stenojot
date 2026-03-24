@@ -77,7 +77,7 @@ export interface SummaryGeneratedEvent {
 /** A single segment of transcribed speech. */
 export interface TranscriptSegment {
   text: string;
-  speaker: "Me" | "Others";
+  speaker: 'Me' | 'Others';
   start_ms: number;
   end_ms: number;
   is_final: boolean;

@@ -1,4 +1,4 @@
-import s from "./Select.module.scss";
+import s from './Select.module.scss';
 
 /** A single option in the Select dropdown. */
 interface SelectOption {
@@ -21,7 +21,13 @@ interface SelectProps {
 }
 
 /** Labeled dropdown select input. */
-export function Select({ label, value, options, onChange, disabled }: SelectProps) {
+export function Select({
+  label,
+  value,
+  options,
+  onChange,
+  disabled,
+}: SelectProps) {
   return (
     <label className={s.wrapper}>
       <span className={s.label}>{label}</span>
@@ -29,7 +35,7 @@ export function Select({ label, value, options, onChange, disabled }: SelectProp
         value={value}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
-        className={`${s.select} ${disabled ? s.disabled : ""}`}
+        className={`${s.select} ${disabled ? s.disabled : ''}`}
       >
         {options.map((opt) => (
           <option key={opt.value} value={opt.value}>

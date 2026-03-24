@@ -5,8 +5,8 @@ import {
   useEffect,
   useRef,
   useState,
-} from "react";
-import type { ReactNode } from "react";
+} from 'react';
+import type { ReactNode } from 'react';
 import {
   getAudioDevices,
   getSystemAudioDevices,
@@ -24,12 +24,12 @@ import {
   setMicGain as setMicGainCmd,
   getVadThreshold,
   setVadThreshold as setVadThresholdCmd,
-} from "../lib/commands";
-import { listen } from "@tauri-apps/api/event";
-import type { AudioDevice, AudioLevels, TranscriptSegment } from "../types";
+} from '../lib/commands';
+import { listen } from '@tauri-apps/api/event';
+import type { AudioDevice, AudioLevels, TranscriptSegment } from '../types';
 
 /** Status of background summary generation after recording stops. */
-export type SummaryStatus = "idle" | "generating" | "complete" | "error";
+export type SummaryStatus = 'idle' | 'generating' | 'complete' | 'error';
 
 /** How often to auto-save the transcript during recording (ms). */
 const AUTO_SAVE_INTERVAL_MS = 30_000;
@@ -96,7 +96,8 @@ const RecordingContext = createContext<RecordingState | null>(null);
 /** Access the global recording state. Must be used within a RecordingProvider. */
 export function useRecording(): RecordingState {
   const ctx = useContext(RecordingContext);
-  if (!ctx) throw new Error("useRecording must be used within RecordingProvider");
+  if (!ctx)
+    throw new Error('useRecording must be used within RecordingProvider');
   return ctx;
 }
 
@@ -109,8 +110,8 @@ interface RecordingProviderProps {
 export function RecordingProvider({ children }: RecordingProviderProps) {
   const [micDevices, setMicDevices] = useState<AudioDevice[]>([]);
   const [systemDevices, setSystemDevices] = useState<AudioDevice[]>([]);
-  const [micDeviceId, setMicDeviceId] = useState("");
-  const [systemDeviceId, setSystemDeviceId] = useState("");
+  const [micDeviceId, setMicDeviceId] = useState('');
+  const [systemDeviceId, setSystemDeviceId] = useState('');
   const [isRecording, setIsRecording] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -124,9 +125,13 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
   const [modelReady, setModelReady] = useState(false);
   const [micGainValue, setMicGainValue] = useState(1.0);
   const [vadThresholdValue, setVadThresholdValue] = useState(0.005);
-  const [lastTranscriptPath, setLastTranscriptPath] = useState<string | null>(null);
-  const [currentTranscriptPath, setCurrentTranscriptPath] = useState<string | null>(null);
-  const [summaryStatus, setSummaryStatus] = useState<SummaryStatus>("idle");
+  const [lastTranscriptPath, setLastTranscriptPath] = useState<string | null>(
+    null,
+  );
+  const [currentTranscriptPath, setCurrentTranscriptPath] = useState<
+    string | null
+  >(null);
+  const [summaryStatus, setSummaryStatus] = useState<SummaryStatus>('idle');
   const [summaryError, setSummaryError] = useState<string | null>(null);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -147,7 +152,7 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
         preferredMicId = saved.mic_device_id;
         preferredSystemId = saved.system_device_id;
       } catch (err) {
-        console.error("Failed to load persisted settings:", err);
+        console.error('Failed to load persisted settings:', err);
       }
 
       try {
@@ -157,9 +162,9 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
           ? micDevs.find((d) => d.id === preferredMicId)
           : null;
         const defaultMic = micDevs.find((d) => d.is_default);
-        setMicDeviceId(preferred?.id ?? defaultMic?.id ?? micDevs[0]?.id ?? "");
+        setMicDeviceId(preferred?.id ?? defaultMic?.id ?? micDevs[0]?.id ?? '');
       } catch (err) {
-        console.error("Failed to get mic devices:", err);
+        console.error('Failed to get mic devices:', err);
       }
 
       try {
@@ -169,24 +174,29 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
           ? sysDevs.find((d) => d.id === preferredSystemId)
           : null;
         const defaultSys = sysDevs.find((d) => d.is_default);
-        setSystemDeviceId(preferred?.id ?? defaultSys?.id ?? sysDevs[0]?.id ?? "");
+        setSystemDeviceId(
+          preferred?.id ?? defaultSys?.id ?? sysDevs[0]?.id ?? '',
+        );
       } catch (err) {
-        console.error("Failed to get system audio devices:", err);
+        console.error('Failed to get system audio devices:', err);
       }
 
       try {
-        const [gain, vad] = await Promise.all([getMicGain(), getVadThreshold()]);
+        const [gain, vad] = await Promise.all([
+          getMicGain(),
+          getVadThreshold(),
+        ]);
         setMicGainValue(gain);
         setVadThresholdValue(vad);
       } catch (err) {
-        console.error("Failed to get audio settings:", err);
+        console.error('Failed to get audio settings:', err);
       }
 
       try {
         const info = await getModelInfo();
         setModelReady(info.downloaded);
       } catch (err) {
-        console.error("Failed to check model status:", err);
+        console.error('Failed to check model status:', err);
       }
     }
     init();
@@ -203,14 +213,14 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
 
   // Listen for summary generation events
   useEffect(() => {
-    const unlistenGenerating = listen("summary-generating", () => {
-      setSummaryStatus("generating");
+    const unlistenGenerating = listen('summary-generating', () => {
+      setSummaryStatus('generating');
     });
-    const unlistenGenerated = listen("summary-generated", () => {
-      setSummaryStatus("complete");
+    const unlistenGenerated = listen('summary-generated', () => {
+      setSummaryStatus('complete');
     });
-    const unlistenError = listen<string>("summary-error", (event) => {
-      setSummaryStatus("error");
+    const unlistenError = listen<string>('summary-error', (event) => {
+      setSummaryStatus('error');
       setSummaryError(event.payload);
     });
     return () => {
@@ -225,18 +235,22 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
       const info = await getModelInfo();
       setModelReady(info.downloaded);
     } catch (err) {
-      console.error("Failed to check model status:", err);
+      console.error('Failed to check model status:', err);
     }
   }, []);
 
   const handleStart = useCallback(async () => {
     try {
       setSegments([]);
-      setSummaryStatus("idle");
+      setSummaryStatus('idle');
       setSummaryError(null);
-      const result = await startRecording(micDeviceId, systemDeviceId, (segment) => {
-        setSegments((prev) => [...prev, segment]);
-      });
+      const result = await startRecording(
+        micDeviceId,
+        systemDeviceId,
+        (segment) => {
+          setSegments((prev) => [...prev, segment]);
+        },
+      );
       setIsRecording(true);
       setIsPaused(false);
       isPausedRef.current = false;
@@ -272,7 +286,7 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
         }
       }, AUTO_SAVE_INTERVAL_MS);
     } catch (err) {
-      console.error("Failed to start recording:", err);
+      console.error('Failed to start recording:', err);
     }
   }, [micDeviceId, systemDeviceId]);
 
@@ -283,13 +297,18 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
       transcriptPath = result.transcript_path;
       setLastTranscriptPath(transcriptPath);
     } catch (err) {
-      console.error("Failed to stop recording:", err);
+      console.error('Failed to stop recording:', err);
     } finally {
       setIsRecording(false);
       setIsPaused(false);
       isPausedRef.current = false;
       setCurrentTranscriptPath(null);
-      setAudioLevels({ mic_rms: 0, system_rms: 0, is_paused: false, auto_stopped: false });
+      setAudioLevels({
+        mic_rms: 0,
+        system_rms: 0,
+        is_paused: false,
+        auto_stopped: false,
+      });
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
@@ -315,7 +334,7 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
       setIsPaused(true);
       isPausedRef.current = true;
     } catch (err) {
-      console.error("Failed to pause recording:", err);
+      console.error('Failed to pause recording:', err);
     }
   }, []);
 
@@ -325,7 +344,7 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
       setIsPaused(false);
       isPausedRef.current = false;
     } catch (err) {
-      console.error("Failed to resume recording:", err);
+      console.error('Failed to resume recording:', err);
     }
   }, []);
 
@@ -334,7 +353,7 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
     try {
       await setMicGainCmd(value);
     } catch (err) {
-      console.error("Failed to set mic gain:", err);
+      console.error('Failed to set mic gain:', err);
     }
   }, []);
 
@@ -343,21 +362,21 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
     try {
       await setVadThresholdCmd(value);
     } catch (err) {
-      console.error("Failed to set VAD threshold:", err);
+      console.error('Failed to set VAD threshold:', err);
     }
   }, []);
 
   const handleSetMicDeviceId = useCallback((id: string) => {
     setMicDeviceId(id);
     setPreferredMic(id).catch((err) =>
-      console.error("Failed to persist mic preference:", err),
+      console.error('Failed to persist mic preference:', err),
     );
   }, []);
 
   const handleSetSystemDeviceId = useCallback((id: string) => {
     setSystemDeviceId(id);
     setPreferredSystemDevice(id).catch((err) =>
-      console.error("Failed to persist system device preference:", err),
+      console.error('Failed to persist system device preference:', err),
     );
   }, []);
 

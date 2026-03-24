@@ -1,4 +1,4 @@
-@use "../../styles" as *;
+@use '../../styles' as *;
 
 // ── Page wrappers ───────────────────────────────
 
@@ -70,7 +70,9 @@
   border: $border-1 solid $color-border;
   border-radius: $radius-12;
   cursor: pointer;
-  transition: background-color 0.2s, border-color 0.2s;
+  transition:
+    background-color 0.2s,
+    border-color 0.2s;
   text-align: left;
   font-family: inherit;
   width: 100%;
@@ -130,7 +132,10 @@
   border-radius: $radius-8;
   cursor: pointer;
   font-family: inherit;
-  transition: background-color 0.2s, color 0.2s, border-color 0.2s;
+  transition:
+    background-color 0.2s,
+    color 0.2s,
+    border-color 0.2s;
 }
 
 .tab:hover {
