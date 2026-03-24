@@ -1,0 +1,126 @@
+name: Release
+
+# Triggered only when a vX.Y.Z tag is pushed.
+# Builds for all platforms in parallel, renames artifacts to include the OS
+# name for clarity, then uploads everything to a single GitHub Release.
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+# Required to create the GitHub Release and upload assets.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      # Each matrix entry is one platform build. os_name and arch_name are used
+      # when renaming artifacts so release asset filenames are human-readable.
+      matrix:
+        include:
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            os_name: linux
+            arch_name: x86_64
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+            os_name: macos
+            arch_name: aarch64
+          - platform: macos-latest
+            target: x86_64-apple-darwin
+            os_name: macos
+            arch_name: x86_64
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            os_name: windows
+            arch_name: x86_64
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Tauri on Linux requires system libraries for WebKit and the app indicator tray.
+      # StenoJot additionally needs PulseAudio dev libs and clang/cmake for whisper.cpp.
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libsoup-3.0-dev \
+            javascriptcoregtk-4.1 \
+            libpulse-dev \
+            clang \
+            cmake
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: yarn
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      # Cache Rust build artifacts to speed up subsequent runs.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: yarn install --frozen-lockfile
+
+      # Build the Tauri app for this platform. tauri-action is used only for
+      # building here — release creation and upload is handled separately so
+      # we can rename the artifacts first.
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        with:
+          args: --target ${{ matrix.target }}
+
+      # Tauri's bundler names artifacts without an OS identifier. This step
+      # copies them into a staging directory with the OS name inserted so
+      # release assets are unambiguous.
+      - name: Prepare release artifacts
+        shell: bash
+        run: |
+          bundle_dir="src-tauri/target/${{ matrix.target }}/release/bundle"
+          os="${{ matrix.os_name }}"
+          arch="${{ matrix.arch_name }}"
+          mkdir -p release-artifacts
+
+          while IFS= read -r -d '' file; do
+            filename=$(basename "$file")
+            if [[ "$filename" == *.app.tar.gz.sig ]]; then
+              newname="${filename%.app.tar.gz.sig}_${os}_${arch}.app.tar.gz.sig"
+            elif [[ "$filename" == *.app.tar.gz ]]; then
+              newname="${filename%.app.tar.gz}_${os}_${arch}.app.tar.gz"
+            else
+              # Insert os after the version number: Name_1.2.3_arch → Name_1.2.3_os_arch
+              newname=$(echo "$filename" | sed -E "s/^(.+_[0-9]+\.[0-9]+\.[0-9]+)_/\1_${os}_/")
+              # Fallback if no version pattern matched
+              if [[ "$newname" == "$filename" ]]; then
+                newname="${os}_${arch}_${filename}"
+              fi
+            fi
+            cp "$file" "release-artifacts/$newname"
+          done < <(find "$bundle_dir" -type f \( \
+            -name "*.deb" -o -name "*.AppImage" -o \
+            -name "*.dmg" -o -name "*.app.tar.gz" -o -name "*.app.tar.gz.sig" -o \
+            -name "*.exe" -o -name "*.msi" \
+          \) -print0)
+
+      # Create the GitHub Release (if it doesn't exist) and upload this
+      # platform's artifacts. All matrix jobs upload to the same release
+      # concurrently — softprops/action-gh-release handles this safely.
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: StenoJot ${{ github.ref_name }}
+          files: release-artifacts/*
