@@ -845,3 +845,12 @@ pub fn read_meeting_summary(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path)
         .map_err(|e| format!("Failed to read summary: {}", e))
 }
+
+/// Refresh the system tray menu to reflect the current recording state.
+///
+/// Called by the frontend after recording state transitions (start, stop,
+/// pause, resume) so the tray menu stays in sync.
+#[tauri::command]
+pub fn refresh_tray(app: tauri::AppHandle) {
+    crate::tray::refresh_tray_menu(&app);
+}

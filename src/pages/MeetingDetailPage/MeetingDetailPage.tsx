@@ -61,7 +61,6 @@ export function MeetingDetailPage() {
 
     let cancelled = false;
     const tab = meeting.has_summary ? 'summary' : 'transcript';
-    setViewTab(tab);
 
     (async () => {
       try {
@@ -69,7 +68,10 @@ export function MeetingDetailPage() {
           tab === 'summary' && meeting.has_summary
             ? await readMeetingSummary(meeting.summary_path)
             : await readMeetingTranscript(meeting.transcript_path);
-        if (!cancelled) setContent(text);
+        if (!cancelled) {
+          setViewTab(tab);
+          setContent(text);
+        }
       } catch {
         if (!cancelled) setContent('Failed to load file.');
       }

@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { formatTime, formatTimestamp, formatFileSize, meetingSlug } from './format';
+import {
+  formatTime,
+  formatTimestamp,
+  formatFileSize,
+  meetingSlug,
+} from './format';
 
 describe('formatTime', () => {
   it('formats zero seconds as 00:00', () => {

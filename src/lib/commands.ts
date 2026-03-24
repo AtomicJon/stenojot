@@ -269,3 +269,11 @@ export function generateSummary(transcriptPath: string): Promise<void> {
 export function readMeetingSummary(path: string): Promise<string> {
   return invoke<string>('read_meeting_summary', { path });
 }
+
+/**
+ * Refresh the system tray menu to reflect the current recording state.
+ * Call after recording state transitions (start, stop, pause, resume).
+ */
+export function refreshTray(): Promise<void> {
+  return invoke('refresh_tray');
+}

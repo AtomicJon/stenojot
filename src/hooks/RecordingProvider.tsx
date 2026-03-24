@@ -17,6 +17,7 @@ import {
   setMicGain as setMicGainCmd,
   getVadThreshold,
   setVadThreshold as setVadThresholdCmd,
+  refreshTray,
 } from '../lib/commands';
 import { listen } from '@tauri-apps/api/event';
 import type { AudioDevice, AudioLevels, TranscriptSegment } from '../types';
@@ -181,6 +182,7 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
       isPausedRef.current = false;
       setElapsedSeconds(0);
       setCurrentTranscriptPath(result.transcript_path);
+      refreshTray().catch(() => {});
 
       // Elapsed timer — skips ticks while paused
       timerRef.current = setInterval(() => {
@@ -228,6 +230,7 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
       setIsPaused(false);
       isPausedRef.current = false;
       setCurrentTranscriptPath(null);
+      refreshTray().catch(() => {});
       setAudioLevels({
         mic_rms: 0,
         system_rms: 0,
@@ -258,6 +261,7 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
       await pauseRecording();
       setIsPaused(true);
       isPausedRef.current = true;
+      refreshTray().catch(() => {});
     } catch (err) {
       console.error('Failed to pause recording:', err);
     }
@@ -268,10 +272,33 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
       await resumeRecording();
       setIsPaused(false);
       isPausedRef.current = false;
+      refreshTray().catch(() => {});
     } catch (err) {
       console.error('Failed to resume recording:', err);
     }
   }, []);
+
+  // Listen for tray recording control events
+  useEffect(() => {
+    const unlistenStart = listen('tray-start-recording', () => {
+      handleStart();
+    });
+    const unlistenPause = listen('tray-pause-recording', () => {
+      handlePause();
+    });
+    const unlistenResume = listen('tray-resume-recording', () => {
+      handleResume();
+    });
+    const unlistenStop = listen('tray-stop-recording', () => {
+      handleStop();
+    });
+    return () => {
+      unlistenStart.then((u) => u());
+      unlistenPause.then((u) => u());
+      unlistenResume.then((u) => u());
+      unlistenStop.then((u) => u());
+    };
+  }, [handleStart, handleStop, handlePause, handleResume]);
 
   const handleGainChange = useCallback(async (value: number) => {
     setMicGainValue(value);

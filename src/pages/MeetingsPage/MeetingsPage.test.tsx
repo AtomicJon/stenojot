@@ -104,10 +104,7 @@ describe('MeetingsPage', () => {
       expect(screen.getByText('Standup')).toBeInTheDocument();
     });
     const link = screen.getByText('Standup').closest('a');
-    expect(link).toHaveAttribute(
-      'href',
-      '/meetings/2026-03-22_14.00_Standup',
-    );
+    expect(link).toHaveAttribute('href', '/meetings/2026-03-22_14.00_Standup');
   });
 
   it('displays file sizes on meeting cards', async () => {

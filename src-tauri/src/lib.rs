@@ -4,11 +4,13 @@ mod llm;
 mod markdown;
 mod settings;
 mod transcription;
+mod tray;
 
 use commands::AppState;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::Mutex;
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -16,7 +18,6 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(Mutex::new(AppState::new()))
         .setup(|app| {
-            use tauri::Manager;
             let config_dir = app
                 .path()
                 .app_config_dir()
@@ -53,6 +54,9 @@ pub fn run() {
             if let Some(ref dir) = persisted.models_dir {
                 let _ = transcription::manager::set_models_dir(PathBuf::from(dir));
             }
+
+            drop(app_state);
+            tray::setup_tray(app)?;
 
             Ok(())
         })
@@ -91,7 +95,16 @@ pub fn run() {
             commands::set_auto_summary,
             commands::generate_summary,
             commands::read_meeting_summary,
+            commands::refresh_tray,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        // Intercept window close to hide instead of quit, so the app stays in the system tray.
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, _event| {});
 }
