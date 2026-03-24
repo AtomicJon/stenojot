@@ -40,7 +40,7 @@ jobs:
     runs-on: ${{ matrix.platform }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # Tauri on Linux requires system libraries for WebKit and the app indicator tray.
       # StenoJot additionally needs PulseAudio dev libs and clang/cmake for whisper.cpp.
@@ -56,10 +56,11 @@ jobs:
             libsoup-3.0-dev \
             javascriptcoregtk-4.1 \
             libpulse-dev \
+            libasound2-dev \
             clang \
             cmake
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version-file: .nvmrc
           cache: yarn
