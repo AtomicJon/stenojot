@@ -22,8 +22,7 @@ pub fn run() {
                 .path()
                 .app_config_dir()
                 .unwrap_or_else(|_| PathBuf::from("/tmp/stenojot"));
-            std::fs::create_dir_all(&config_dir)
-                .expect("Failed to create app config directory");
+            std::fs::create_dir_all(&config_dir).expect("Failed to create app config directory");
 
             let persisted = settings::load(&config_dir);
 

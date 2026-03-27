@@ -46,18 +46,25 @@ pub fn generate_summary(
     let transcript_body = extract_transcript_body(&transcript_content);
 
     // Generate meeting title from the beginning of the transcript
-    let title_input: String = transcript_body.chars().take(prompts::TITLE_MAX_CHARS).collect();
+    let title_input: String = transcript_body
+        .chars()
+        .take(prompts::TITLE_MAX_CHARS)
+        .collect();
     let title = match client.complete(prompts::TITLE_SYSTEM, &title_input) {
         Ok(resp) => {
             let raw = resp.text.trim().to_string();
             let sanitized = markdown::sanitize_filename(&raw);
-            if sanitized.is_empty() { current_meeting_name.to_string() } else { sanitized }
+            if sanitized.is_empty() {
+                current_meeting_name.to_string()
+            } else {
+                sanitized
+            }
         }
         Err(_) => current_meeting_name.to_string(),
     };
 
     // Generate summary using chunked summarization
-    let summary_body = summarize_chunked(client.as_ref(), &transcript_body)?;
+    let summary_body = summarize_chunked(client.as_ref(), transcript_body)?;
 
     // Format the full summary file content
     let summary_content = format_summary(&title, start_time, end_time, &summary_body);
@@ -125,9 +132,7 @@ fn summarize_chunked(
     }
 
     // First chunk: standard summary prompt
-    let mut running_summary = client
-        .complete(prompts::SUMMARY_SYSTEM, chunks[0])?
-        .text;
+    let mut running_summary = client.complete(prompts::SUMMARY_SYSTEM, chunks[0])?.text;
 
     // Remaining chunks: refinement prompt
     for chunk in &chunks[1..] {
@@ -255,7 +260,11 @@ mod tests {
         assert!(chunks.len() >= 2);
         // Each chunk should start with "[" (a timestamp) except possibly the first
         for chunk in &chunks[1..] {
-            assert!(chunk.starts_with('['), "Chunk should start with timestamp: {}", chunk);
+            assert!(
+                chunk.starts_with('['),
+                "Chunk should start with timestamp: {}",
+                chunk
+            );
         }
     }
 

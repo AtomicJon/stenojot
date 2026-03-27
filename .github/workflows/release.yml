@@ -9,11 +9,44 @@ on:
       - 'v[0-9]+.[0-9]+.[0-9]+'
 
 # Required to create the GitHub Release and upload assets.
+# actions: read is needed by the ci-gate job to query workflow run status.
 permissions:
   contents: write
+  actions: read
 
 jobs:
+  # Wait for the CI workflow to pass on this commit before building release
+  # artifacts. Prevents publishing a known-broken tag.
+  ci-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for CI to succeed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha="${{ github.sha }}"
+          repo="${{ github.repository }}"
+
+          echo "Waiting for CI workflow to appear for $sha ..."
+          for i in $(seq 1 30); do
+            run_id=$(gh run list --repo "$repo" --workflow CI --commit "$sha" \
+              --json databaseId --jq '.[0].databaseId' 2>/dev/null || true)
+            if [ -n "$run_id" ]; then
+              break
+            fi
+            sleep 10
+          done
+
+          if [ -z "$run_id" ]; then
+            echo "::error::CI workflow run not found for commit $sha"
+            exit 1
+          fi
+
+          echo "Found CI run $run_id — watching for completion ..."
+          gh run watch "$run_id" --repo "$repo" --exit-status
+
   release:
+    needs: ci-gate
     strategy:
       fail-fast: false
       # Each matrix entry is one platform build. os_name and arch_name are used

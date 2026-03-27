@@ -12,8 +12,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 /// Base URL for downloading ggml Whisper models from Hugging Face.
-const HF_BASE_URL: &str =
-    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
+const HF_BASE_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
 
 /// Optional override for the models storage directory.
 static CUSTOM_MODELS_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
@@ -38,8 +37,7 @@ pub struct ModelInfo {
 /// The directory must exist or be creatable. Returns an error if the path
 /// is not a valid directory and cannot be created.
 pub fn set_models_dir(path: PathBuf) -> Result<(), String> {
-    fs::create_dir_all(&path)
-        .map_err(|e| format!("Failed to create models directory: {}", e))?;
+    fs::create_dir_all(&path).map_err(|e| format!("Failed to create models directory: {}", e))?;
     let mut dir = CUSTOM_MODELS_DIR
         .lock()
         .map_err(|e| format!("Lock error: {}", e))?;
@@ -133,8 +131,7 @@ pub fn delete_model(model_name: &str) -> Result<(), String> {
     if !path.exists() {
         return Err(format!("Model file does not exist: {}", path.display()));
     }
-    fs::remove_file(&path)
-        .map_err(|e| format!("Failed to delete model file: {}", e))?;
+    fs::remove_file(&path).map_err(|e| format!("Failed to delete model file: {}", e))?;
     Ok(())
 }
 
@@ -158,8 +155,8 @@ pub fn download_model_file(model_name: &str) -> Result<PathBuf, String> {
     let url = get_download_url(model_name);
     eprintln!("Downloading model from {} ...", url);
 
-    let response = reqwest::blocking::get(&url)
-        .map_err(|e| format!("Download request failed: {}", e))?;
+    let response =
+        reqwest::blocking::get(&url).map_err(|e| format!("Download request failed: {}", e))?;
 
     if !response.status().is_success() {
         return Err(format!(
@@ -172,8 +169,8 @@ pub fn download_model_file(model_name: &str) -> Result<PathBuf, String> {
         .bytes()
         .map_err(|e| format!("Failed to read response body: {}", e))?;
 
-    let mut file = fs::File::create(&path)
-        .map_err(|e| format!("Failed to create model file: {}", e))?;
+    let mut file =
+        fs::File::create(&path).map_err(|e| format!("Failed to create model file: {}", e))?;
 
     file.write_all(&bytes)
         .map_err(|e| format!("Failed to write model file: {}", e))?;

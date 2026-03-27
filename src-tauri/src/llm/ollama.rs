@@ -23,7 +23,10 @@ impl OllamaClient {
     /// Create a new Ollama client from the given configuration.
     pub fn new(config: &LlmConfig) -> Self {
         Self {
-            base_url: config.effective_base_url().trim_end_matches('/').to_string(),
+            base_url: config
+                .effective_base_url()
+                .trim_end_matches('/')
+                .to_string(),
             model: config.effective_model().to_string(),
             client: Client::new(),
         }
@@ -64,10 +67,7 @@ pub fn parse_chat_response(body: &str) -> Result<LlmResponse, LlmError> {
         });
     }
 
-    let text = resp
-        .message
-        .map(|m| m.content)
-        .unwrap_or_default();
+    let text = resp.message.map(|m| m.content).unwrap_or_default();
 
     if text.is_empty() {
         return Err(LlmError::ParseError(
@@ -97,24 +97,26 @@ impl LlmClient for OllamaClient {
             stream: false,
         };
 
-        let response = self
-            .client
-            .post(&url)
-            .json(&request)
-            .send()
-            .map_err(|e: reqwest::Error| {
-                if e.is_connect() {
-                    LlmError::Unavailable(format!(
-                        "Cannot connect to Ollama at {}. Is Ollama running?",
-                        self.base_url
-                    ))
-                } else {
-                    LlmError::Network(e.to_string())
-                }
-            })?;
+        let response =
+            self.client
+                .post(&url)
+                .json(&request)
+                .send()
+                .map_err(|e: reqwest::Error| {
+                    if e.is_connect() {
+                        LlmError::Unavailable(format!(
+                            "Cannot connect to Ollama at {}. Is Ollama running?",
+                            self.base_url
+                        ))
+                    } else {
+                        LlmError::Network(e.to_string())
+                    }
+                })?;
 
         let status = response.status().as_u16();
-        let body = response.text().map_err(|e: reqwest::Error| LlmError::Network(e.to_string()))?;
+        let body = response
+            .text()
+            .map_err(|e: reqwest::Error| LlmError::Network(e.to_string()))?;
 
         if status >= 400 {
             return Err(LlmError::ApiError {

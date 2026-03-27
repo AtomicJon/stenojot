@@ -353,11 +353,29 @@ mod tests {
     fn llm_error_display() {
         // Arrange
         let errors = vec![
-            (LlmError::Network("timeout".to_string()), "Network error: timeout"),
-            (LlmError::ApiError { status: 429, message: "rate limit".to_string() }, "API error (429): rate limit"),
-            (LlmError::ParseError("bad json".to_string()), "Parse error: bad json"),
-            (LlmError::Unavailable("not running".to_string()), "Provider unavailable: not running"),
-            (LlmError::MissingConfig("no key".to_string()), "Missing config: no key"),
+            (
+                LlmError::Network("timeout".to_string()),
+                "Network error: timeout",
+            ),
+            (
+                LlmError::ApiError {
+                    status: 429,
+                    message: "rate limit".to_string(),
+                },
+                "API error (429): rate limit",
+            ),
+            (
+                LlmError::ParseError("bad json".to_string()),
+                "Parse error: bad json",
+            ),
+            (
+                LlmError::Unavailable("not running".to_string()),
+                "Provider unavailable: not running",
+            ),
+            (
+                LlmError::MissingConfig("no key".to_string()),
+                "Missing config: no key",
+            ),
         ];
 
         for (error, expected) in errors {

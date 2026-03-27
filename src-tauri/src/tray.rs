@@ -61,13 +61,22 @@ pub fn setup_tray(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>
 fn build_idle_menu(app: &tauri::App) -> Result<Menu<tauri::Wry>, tauri::Error> {
     let start = MenuItem::with_id(app, ID_START, "Start Recording", true, None::<&str>)?;
     let sep1 = PredefinedMenuItem::separator(app)?;
-    let session = MenuItem::with_id(app, ID_CURRENT_SESSION, "Current Session", true, None::<&str>)?;
+    let session = MenuItem::with_id(
+        app,
+        ID_CURRENT_SESSION,
+        "Current Session",
+        true,
+        None::<&str>,
+    )?;
     let meetings = MenuItem::with_id(app, ID_MEETINGS, "Meetings", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, ID_SETTINGS, "Settings", true, None::<&str>)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, ID_QUIT, "Quit", true, None::<&str>)?;
 
-    Menu::with_items(app, &[&start, &sep1, &session, &meetings, &settings, &sep2, &quit])
+    Menu::with_items(
+        app,
+        &[&start, &sep1, &session, &meetings, &settings, &sep2, &quit],
+    )
 }
 
 /// Build the tray menu based on current recording state.
@@ -80,21 +89,69 @@ fn build_menu(
 
     if is_recording {
         if is_paused {
-            items.push(Box::new(MenuItem::with_id(app, ID_RESUME, "Resume Recording", true, None::<&str>)?));
+            items.push(Box::new(MenuItem::with_id(
+                app,
+                ID_RESUME,
+                "Resume Recording",
+                true,
+                None::<&str>,
+            )?));
         } else {
-            items.push(Box::new(MenuItem::with_id(app, ID_PAUSE, "Pause Recording", true, None::<&str>)?));
+            items.push(Box::new(MenuItem::with_id(
+                app,
+                ID_PAUSE,
+                "Pause Recording",
+                true,
+                None::<&str>,
+            )?));
         }
-        items.push(Box::new(MenuItem::with_id(app, ID_STOP, "Stop Recording", true, None::<&str>)?));
+        items.push(Box::new(MenuItem::with_id(
+            app,
+            ID_STOP,
+            "Stop Recording",
+            true,
+            None::<&str>,
+        )?));
     } else {
-        items.push(Box::new(MenuItem::with_id(app, ID_START, "Start Recording", true, None::<&str>)?));
+        items.push(Box::new(MenuItem::with_id(
+            app,
+            ID_START,
+            "Start Recording",
+            true,
+            None::<&str>,
+        )?));
     }
 
     items.push(Box::new(PredefinedMenuItem::separator(app)?));
-    items.push(Box::new(MenuItem::with_id(app, ID_CURRENT_SESSION, "Current Session", true, None::<&str>)?));
-    items.push(Box::new(MenuItem::with_id(app, ID_MEETINGS, "Meetings", true, None::<&str>)?));
-    items.push(Box::new(MenuItem::with_id(app, ID_SETTINGS, "Settings", true, None::<&str>)?));
+    items.push(Box::new(MenuItem::with_id(
+        app,
+        ID_CURRENT_SESSION,
+        "Current Session",
+        true,
+        None::<&str>,
+    )?));
+    items.push(Box::new(MenuItem::with_id(
+        app,
+        ID_MEETINGS,
+        "Meetings",
+        true,
+        None::<&str>,
+    )?));
+    items.push(Box::new(MenuItem::with_id(
+        app,
+        ID_SETTINGS,
+        "Settings",
+        true,
+        None::<&str>,
+    )?));
     items.push(Box::new(PredefinedMenuItem::separator(app)?));
-    items.push(Box::new(MenuItem::with_id(app, ID_QUIT, "Quit", true, None::<&str>)?));
+    items.push(Box::new(MenuItem::with_id(
+        app,
+        ID_QUIT,
+        "Quit",
+        true,
+        None::<&str>,
+    )?));
 
     let refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
         items.iter().map(|b| b.as_ref()).collect();
@@ -163,7 +220,9 @@ fn toggle_window(app: &AppHandle) {
 pub fn refresh_tray_menu(app: &AppHandle) {
     let (is_recording, is_paused) = {
         let state = app.state::<Mutex<AppState>>();
-        let app_state = state.lock().expect("Failed to lock AppState for tray refresh");
+        let app_state = state
+            .lock()
+            .expect("Failed to lock AppState for tray refresh");
         (app_state.is_recording, app_state.is_paused)
     };
 

@@ -123,11 +123,9 @@ pub fn save(data_dir: &Path, settings: &Settings) -> Result<(), String> {
     let json = serde_json::to_string_pretty(settings)
         .map_err(|e| format!("Failed to serialize settings: {}", e))?;
 
-    fs::write(&tmp_path, json)
-        .map_err(|e| format!("Failed to write settings file: {}", e))?;
+    fs::write(&tmp_path, json).map_err(|e| format!("Failed to write settings file: {}", e))?;
 
-    fs::rename(&tmp_path, &path)
-        .map_err(|e| format!("Failed to rename settings file: {}", e))?;
+    fs::rename(&tmp_path, &path).map_err(|e| format!("Failed to rename settings file: {}", e))?;
 
     Ok(())
 }
@@ -188,7 +186,10 @@ mod tests {
         assert!((loaded.vad_threshold - 0.01).abs() < f32::EPSILON);
         assert_eq!(loaded.models_dir.as_deref(), Some("/custom/models"));
         assert_eq!(loaded.whisper_model, "small");
-        assert_eq!(loaded.initial_prompt.as_deref(), Some("Kubernetes, PostgreSQL"));
+        assert_eq!(
+            loaded.initial_prompt.as_deref(),
+            Some("Kubernetes, PostgreSQL")
+        );
         assert_eq!(loaded.max_segment_seconds, 20);
         assert_eq!(loaded.llm_provider, "anthropic");
         assert_eq!(loaded.llm_model.as_deref(), Some("claude-opus-4-20250514"));
@@ -247,11 +248,7 @@ mod tests {
         // Arrange — JSON from before Phase 4, no LLM fields
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("settings.json");
-        fs::write(
-            &path,
-            r#"{ "mic_gain": 1.5, "whisper_model": "small" }"#,
-        )
-        .unwrap();
+        fs::write(&path, r#"{ "mic_gain": 1.5, "whisper_model": "small" }"#).unwrap();
 
         // Act
         let settings = load(tmp.path());
@@ -272,11 +269,7 @@ mod tests {
         // Arrange — JSON has a field that doesn't exist in the struct
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("settings.json");
-        fs::write(
-            &path,
-            r#"{ "mic_gain": 2.0, "future_field": "hello" }"#,
-        )
-        .unwrap();
+        fs::write(&path, r#"{ "mic_gain": 2.0, "future_field": "hello" }"#).unwrap();
 
         // Act
         let settings = load(tmp.path());

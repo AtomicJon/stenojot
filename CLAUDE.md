@@ -7,18 +7,31 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-yarn tauri dev         # Start full app (Vite on :1420 + Tauri window)
-yarn tauri build       # Production build with platform installers
-yarn build             # Frontend only (TypeScript + Vite)
-npx tsc --noEmit       # Type-check without emitting
-npx vite build         # Frontend bundle only
-cargo check            # Rust type-check (run from src-tauri/)
+yarn tauri dev           # Start full app (Vite on :1420 + Tauri window)
+yarn tauri build         # Production build with platform installers
+yarn build               # Frontend only (TypeScript + Vite)
 
 # Testing
-yarn test              # Run ALL tests (UI + Tauri backend)
-yarn test:ui           # Frontend tests only (vitest)
-yarn test:ui:watch     # Frontend tests in watch mode
-yarn test:tauri        # Rust backend tests only (cargo test)
+yarn test                # Run ALL tests (UI + Tauri backend)
+yarn test:ui             # Frontend tests only (vitest)
+yarn test:ui:watch       # Frontend tests in watch mode
+yarn test:tauri          # Rust backend tests only (cargo test)
+
+# Linting & type-checking
+yarn lint                # ESLint + TypeScript type-check (frontend)
+yarn lint:tauri          # Clippy with -D warnings (Rust)
+yarn lint:all            # Both of the above
+
+# Formatting
+yarn format              # Prettier auto-fix (frontend)
+yarn format:check        # Prettier check only (frontend)
+yarn format:tauri        # cargo fmt (Rust)
+yarn format:tauri:check  # cargo fmt --check (Rust)
+yarn format:all          # Auto-fix both frontend + Rust
+yarn format:all:check    # Check both frontend + Rust
+
+# Full CI check (runs locally what CI runs)
+yarn ci                  # format:all:check + lint:all + test
 ```
 
 **Important:** Always run `nvm use` before any yarn/node commands.

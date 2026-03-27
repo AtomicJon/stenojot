@@ -27,7 +27,10 @@ impl OpenAiClient {
     /// Create a new OpenAI client from the given configuration.
     pub fn new(config: &LlmConfig) -> Self {
         Self {
-            base_url: config.effective_base_url().trim_end_matches('/').to_string(),
+            base_url: config
+                .effective_base_url()
+                .trim_end_matches('/')
+                .to_string(),
             model: config.effective_model().to_string(),
             api_key: config.api_key.clone().unwrap_or_default(),
             client: Client::new(),
@@ -138,7 +141,9 @@ impl LlmClient for OpenAiClient {
             .map_err(|e: reqwest::Error| LlmError::Network(e.to_string()))?;
 
         let status = response.status().as_u16();
-        let body = response.text().map_err(|e: reqwest::Error| LlmError::Network(e.to_string()))?;
+        let body = response
+            .text()
+            .map_err(|e: reqwest::Error| LlmError::Network(e.to_string()))?;
 
         if status >= 400 {
             if let Ok(resp) = serde_json::from_str::<CompletionsResponse>(&body) {

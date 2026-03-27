@@ -12,11 +12,11 @@ use crate::audio::pipeline;
 use crate::audio::system_capture::{self, SystemCaptureHandle};
 use crate::audio::types::{AudioDevice, AudioLevels, CaptureError, TranscriptSegment};
 use crate::llm;
-use crate::llm::provider::{LlmConfig, parse_provider};
+use crate::llm::provider::{parse_provider, LlmConfig};
 use crate::markdown;
 use crate::settings::{self, Settings};
 use crate::transcription::manager::{self, ModelInfo};
-use crate::transcription::worker::TranscriptionWorker;
+use crate::transcription::worker::{TranscriptionWorker, WorkerConfig};
 
 /// Application state managed by Tauri.
 pub struct AppState {
@@ -91,9 +91,7 @@ impl AppState {
             mic_rms: Arc::new(AtomicU32::new(0)),
             system_rms: Arc::new(AtomicU32::new(0)),
             mic_gain: Arc::new(AtomicU32::new(1.0f32.to_bits())),
-            vad_threshold: Arc::new(AtomicU32::new(
-                pipeline::DEFAULT_VAD_THRESHOLD.to_bits(),
-            )),
+            vad_threshold: Arc::new(AtomicU32::new(pipeline::DEFAULT_VAD_THRESHOLD.to_bits())),
             mic_stream: None,
             system_capture: None,
             worker: None,
@@ -127,8 +125,7 @@ fn save_current_settings(app_state: &AppState) {
         system_device_id: app_state.preferred_system_device_id.clone(),
         mic_gain: f32::from_bits(app_state.mic_gain.load(Ordering::Relaxed)),
         vad_threshold: f32::from_bits(app_state.vad_threshold.load(Ordering::Relaxed)),
-        models_dir: manager::get_custom_models_dir()
-            .map(|p| p.to_string_lossy().to_string()),
+        models_dir: manager::get_custom_models_dir().map(|p| p.to_string_lossy().to_string()),
         output_dir: app_state.output_dir.clone(),
         silence_timeout_seconds: app_state.silence_timeout_seconds,
         whisper_model: app_state.whisper_model.clone(),
@@ -170,7 +167,10 @@ pub fn get_settings(state: State<'_, Mutex<AppState>>) -> Result<Settings, Strin
 
 /// Set and persist the preferred microphone device ID.
 #[tauri::command]
-pub fn set_preferred_mic(device_id: String, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
+pub fn set_preferred_mic(
+    device_id: String,
+    state: State<'_, Mutex<AppState>>,
+) -> Result<(), String> {
     let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
     app_state.preferred_mic_device_id = Some(device_id);
     save_current_settings(&app_state);
@@ -179,7 +179,10 @@ pub fn set_preferred_mic(device_id: String, state: State<'_, Mutex<AppState>>) -
 
 /// Set and persist the preferred system audio device ID.
 #[tauri::command]
-pub fn set_preferred_system_device(device_id: String, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
+pub fn set_preferred_system_device(
+    device_id: String,
+    state: State<'_, Mutex<AppState>>,
+) -> Result<(), String> {
     let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
     app_state.preferred_system_device_id = Some(device_id);
     save_current_settings(&app_state);
@@ -235,7 +238,11 @@ pub fn set_whisper_model(model: String, state: State<'_, Mutex<AppState>>) -> Re
 #[tauri::command]
 pub fn set_initial_prompt(prompt: String, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
     let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
-    app_state.initial_prompt = if prompt.is_empty() { None } else { Some(prompt) };
+    app_state.initial_prompt = if prompt.is_empty() {
+        None
+    } else {
+        Some(prompt)
+    };
     save_current_settings(&app_state);
     Ok(())
 }
@@ -245,7 +252,10 @@ pub fn set_initial_prompt(prompt: String, state: State<'_, Mutex<AppState>>) -> 
 /// Clamped to 1–30 seconds. Larger values reduce Whisper startup overhead
 /// but increase latency before transcription appears.
 #[tauri::command]
-pub fn set_max_segment_seconds(seconds: u32, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
+pub fn set_max_segment_seconds(
+    seconds: u32,
+    state: State<'_, Mutex<AppState>>,
+) -> Result<(), String> {
     let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
     app_state.max_segment_seconds = seconds.clamp(1, 30);
     save_current_settings(&app_state);
@@ -291,9 +301,8 @@ pub fn start_recording(
     let model_path = manager::get_model_path(model_name);
 
     // Start mic capture with current gain setting
-    let mic_handle =
-        capture::start_capture(&mic_device_id, Arc::clone(&app_state.mic_gain))
-            .map_err(|e| e.to_string())?;
+    let mic_handle = capture::start_capture(&mic_device_id, Arc::clone(&app_state.mic_gain))
+        .map_err(|e| e.to_string())?;
     app_state.mic_rms = mic_handle.rms_level;
     app_state.mic_sample_rate = mic_handle.sample_rate;
     app_state.mic_channels = mic_handle.channels;
@@ -312,20 +321,20 @@ pub fn start_recording(
         .ok_or("System audio consumer already taken")?;
 
     // Spawn the transcription worker with ownership of the ring buffer consumers
-    let worker = TranscriptionWorker::start(
+    let worker = TranscriptionWorker::start(WorkerConfig {
         model_path,
-        mic_handle.consumer,
+        mic_consumer: mic_handle.consumer,
         system_consumer,
-        app_state.mic_sample_rate,
-        app_state.mic_channels,
-        app_state.system_sample_rate,
-        app_state.system_channels,
-        Arc::clone(&app_state.vad_threshold),
-        app_state.silence_timeout_seconds,
-        app_state.initial_prompt.clone(),
-        app_state.max_segment_seconds,
-        on_transcript,
-    )?;
+        mic_sample_rate: app_state.mic_sample_rate,
+        mic_channels: app_state.mic_channels,
+        system_sample_rate: app_state.system_sample_rate,
+        system_channels: app_state.system_channels,
+        vad_threshold: Arc::clone(&app_state.vad_threshold),
+        silence_timeout_seconds: app_state.silence_timeout_seconds,
+        initial_prompt: app_state.initial_prompt.clone(),
+        max_segment_seconds: app_state.max_segment_seconds,
+        channel: on_transcript,
+    })?;
 
     let start_time = chrono::Local::now();
     let loaded = settings::load(&app_state.config_dir);
@@ -333,13 +342,8 @@ pub fn start_recording(
     let meeting_name = markdown::resolve_meeting_name(&start_time);
 
     // Create the transcript file immediately with just the header
-    let transcript_path = markdown::write_transcript(
-        &output_dir,
-        &[],
-        &meeting_name,
-        start_time,
-        start_time,
-    )?;
+    let transcript_path =
+        markdown::write_transcript(&output_dir, &[], &meeting_name, start_time, start_time)?;
 
     app_state.mic_stream = Some(mic_handle.stream);
     app_state.system_capture = Some(system_handle);
@@ -418,13 +422,12 @@ pub fn stop_recording(
         .unwrap_or_else(chrono::Local::now);
 
     let end_time = chrono::Local::now();
-    let name_str = meeting_name
-        .as_deref()
-        .unwrap_or("Meeting")
-        .to_string();
+    let name_str = meeting_name.as_deref().unwrap_or("Meeting").to_string();
 
     let path_str = if let Some(ref path) = transcript_path {
-        if let Err(e) = markdown::update_transcript(path, &segments, &name_str, start_time, end_time) {
+        if let Err(e) =
+            markdown::update_transcript(path, &segments, &name_str, start_time, end_time)
+        {
             eprintln!("Failed to write final transcript: {}", e);
         }
         Some(path.to_string_lossy().to_string())
@@ -453,12 +456,7 @@ pub fn stop_recording(
             std::thread::spawn(move || {
                 let _ = app_handle.emit("summary-generating", ());
                 match llm::summary::generate_summary(
-                    &config,
-                    &tx_path,
-                    &out_dir,
-                    start_time,
-                    end_time,
-                    &name,
+                    &config, &tx_path, &out_dir, start_time, end_time, &name,
                 ) {
                     Ok(result) => {
                         let _ = app_handle.emit(
@@ -468,10 +466,7 @@ pub fn stop_recording(
                                     .transcript_path
                                     .to_string_lossy()
                                     .to_string(),
-                                summary_path: result
-                                    .summary_path
-                                    .to_string_lossy()
-                                    .to_string(),
+                                summary_path: result.summary_path.to_string_lossy().to_string(),
                                 meeting_name: result.meeting_name,
                             },
                         );
@@ -534,7 +529,9 @@ pub fn get_audio_levels(state: State<'_, Mutex<AppState>>) -> Result<AudioLevels
 pub fn set_mic_gain(gain: f32, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
     let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
     let clamped = gain.clamp(0.1, 10.0);
-    app_state.mic_gain.store(clamped.to_bits(), Ordering::Relaxed);
+    app_state
+        .mic_gain
+        .store(clamped.to_bits(), Ordering::Relaxed);
     save_current_settings(&app_state);
     Ok(())
 }
@@ -616,7 +613,9 @@ pub fn download_model(state: State<'_, Mutex<AppState>>) -> Result<String, Strin
 
 /// List meetings in the output directory.
 #[tauri::command]
-pub fn list_meetings(state: State<'_, Mutex<AppState>>) -> Result<Vec<markdown::MeetingEntry>, String> {
+pub fn list_meetings(
+    state: State<'_, Mutex<AppState>>,
+) -> Result<Vec<markdown::MeetingEntry>, String> {
     let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
     let loaded = settings::load(&app_state.config_dir);
     let output_dir = loaded.output_dir_resolved();
@@ -626,8 +625,7 @@ pub fn list_meetings(state: State<'_, Mutex<AppState>>) -> Result<Vec<markdown::
 /// Read the contents of a transcript file.
 #[tauri::command]
 pub fn read_meeting_transcript(path: String) -> Result<String, String> {
-    std::fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read transcript: {}", e))
+    std::fs::read_to_string(&path).map_err(|e| format!("Failed to read transcript: {}", e))
 }
 
 /// Pause the current recording session. Audio streams continue but samples
@@ -707,10 +705,7 @@ pub fn save_current_transcript(
 ///
 /// Valid values: "ollama", "anthropic", "openai". Unknown values default to "ollama".
 #[tauri::command]
-pub fn set_llm_provider(
-    provider: String,
-    state: State<'_, Mutex<AppState>>,
-) -> Result<(), String> {
+pub fn set_llm_provider(provider: String, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
     let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
     // Validate and normalize the provider string
     let normalized = parse_provider(&provider).to_string();
@@ -725,11 +720,7 @@ pub fn set_llm_provider(
 #[tauri::command]
 pub fn set_llm_model(model: String, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
     let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
-    app_state.llm_model = if model.is_empty() {
-        None
-    } else {
-        Some(model)
-    };
+    app_state.llm_model = if model.is_empty() { None } else { Some(model) };
     save_current_settings(&app_state);
     Ok(())
 }
@@ -758,10 +749,7 @@ pub fn set_llm_base_url(url: String, state: State<'_, Mutex<AppState>>) -> Resul
 
 /// Enable or disable automatic summary generation after recording stops.
 #[tauri::command]
-pub fn set_auto_summary(
-    enabled: bool,
-    state: State<'_, Mutex<AppState>>,
-) -> Result<(), String> {
+pub fn set_auto_summary(enabled: bool, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
     let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
     app_state.auto_summary = enabled;
     save_current_settings(&app_state);
@@ -810,14 +798,7 @@ pub fn generate_summary(
     let app_handle = app.clone();
     std::thread::spawn(move || {
         let _ = app_handle.emit("summary-generating", ());
-        match llm::summary::generate_summary(
-            &config,
-            &tx_path,
-            &out_dir,
-            now,
-            now,
-            &meeting_name,
-        ) {
+        match llm::summary::generate_summary(&config, &tx_path, &out_dir, now, now, &meeting_name) {
             Ok(result) => {
                 let _ = app_handle.emit(
                     "summary-generated",
@@ -842,8 +823,7 @@ pub fn generate_summary(
 /// Read the contents of a summary file.
 #[tauri::command]
 pub fn read_meeting_summary(path: String) -> Result<String, String> {
-    std::fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read summary: {}", e))
+    std::fs::read_to_string(&path).map_err(|e| format!("Failed to read summary: {}", e))
 }
 
 /// Refresh the system tray menu to reflect the current recording state.

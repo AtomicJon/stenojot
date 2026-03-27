@@ -155,8 +155,7 @@ pub fn write_transcript(
     fs::write(&tmp_path, &content)
         .map_err(|e| format!("Failed to write transcript file: {}", e))?;
 
-    fs::rename(&tmp_path, &path)
-        .map_err(|e| format!("Failed to rename transcript file: {}", e))?;
+    fs::rename(&tmp_path, &path).map_err(|e| format!("Failed to rename transcript file: {}", e))?;
 
     eprintln!("Transcript saved to {}", path.display());
     Ok(path)
@@ -178,8 +177,7 @@ pub fn update_transcript(
     fs::write(&tmp_path, &content)
         .map_err(|e| format!("Failed to write transcript file: {}", e))?;
 
-    fs::rename(&tmp_path, path)
-        .map_err(|e| format!("Failed to rename transcript file: {}", e))?;
+    fs::rename(&tmp_path, path).map_err(|e| format!("Failed to rename transcript file: {}", e))?;
 
     Ok(())
 }
@@ -707,9 +705,8 @@ mod tests {
     #[test]
     fn summary_path_for_transcript_standard() {
         // Arrange — transcript lives in transcripts/ subdir
-        let transcript = PathBuf::from(
-            "/output/transcripts/2026-03-22 14.00 Sprint Planning - Transcript.md",
-        );
+        let transcript =
+            PathBuf::from("/output/transcripts/2026-03-22 14.00 Sprint Planning - Transcript.md");
 
         // Act
         let summary = summary_path_for_transcript(&transcript);

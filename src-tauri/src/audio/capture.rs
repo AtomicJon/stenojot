@@ -12,9 +12,7 @@ use super::types::{AudioDevice, CaptureError};
 pub fn list_input_devices() -> Result<Vec<AudioDevice>, CaptureError> {
     let host = cpal::default_host();
 
-    let default_device_name = host
-        .default_input_device()
-        .and_then(|d| d.name().ok());
+    let default_device_name = host.default_input_device().and_then(|d| d.name().ok());
 
     let devices = host
         .input_devices()
@@ -72,10 +70,7 @@ pub struct CaptureHandle {
 /// The `gain` parameter is a shared atomic f32 (stored as u32 bits) that
 /// scales the captured samples in real time. A value of 1.0 is unity gain.
 /// It can be changed while recording to adjust sensitivity on the fly.
-pub fn start_capture(
-    device_id: &str,
-    gain: Arc<AtomicU32>,
-) -> Result<CaptureHandle, CaptureError> {
+pub fn start_capture(device_id: &str, gain: Arc<AtomicU32>) -> Result<CaptureHandle, CaptureError> {
     let device = find_device_by_id(device_id)?;
 
     let config = device
@@ -114,10 +109,8 @@ pub fn start_capture(
         SampleFormat::I16 => device.build_input_stream(
             &stream_config,
             move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                let float_data: Vec<f32> = data
-                    .iter()
-                    .map(|&s| s as f32 / i16::MAX as f32)
-                    .collect();
+                let float_data: Vec<f32> =
+                    data.iter().map(|&s| s as f32 / i16::MAX as f32).collect();
                 capture_callback_with_gain(&float_data, &mut producer, &rms_level_clone, &gain);
             },
             err_fn,

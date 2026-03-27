@@ -23,6 +23,37 @@ use crate::audio::types::{Speaker, TranscriptSegment};
 /// Prepended to the next segment to prevent word truncation at boundaries.
 const OVERLAP_SAMPLES: usize = 4_800;
 
+/// Configuration for starting a transcription worker.
+///
+/// Bundles all the parameters needed to spawn the background transcription
+/// thread, keeping function signatures manageable.
+pub struct WorkerConfig {
+    /// Path to the ggml Whisper model file.
+    pub model_path: std::path::PathBuf,
+    /// Ring buffer consumer for the microphone stream.
+    pub mic_consumer: HeapCons<f32>,
+    /// Ring buffer consumer for the system audio stream.
+    pub system_consumer: HeapCons<f32>,
+    /// Sample rate of the mic capture.
+    pub mic_sample_rate: u32,
+    /// Channel count of the mic capture.
+    pub mic_channels: u16,
+    /// Sample rate of the system capture.
+    pub system_sample_rate: u32,
+    /// Channel count of the system capture.
+    pub system_channels: u16,
+    /// Shared VAD threshold value.
+    pub vad_threshold: Arc<AtomicU32>,
+    /// Auto-stop after this many seconds of silence.
+    pub silence_timeout_seconds: Option<u32>,
+    /// Optional prompt to guide Whisper (domain terms, names).
+    pub initial_prompt: Option<String>,
+    /// Maximum segment duration before forced transcription.
+    pub max_segment_seconds: u32,
+    /// Tauri IPC channel for sending segments to the frontend.
+    pub channel: Channel<TranscriptSegment>,
+}
+
 /// How long the worker sleeps between drain cycles (milliseconds).
 const POLL_INTERVAL_MS: u64 = 100;
 
@@ -48,40 +79,15 @@ impl TranscriptionWorker {
     /// Spawn the transcription worker thread.
     ///
     /// # Arguments
-    /// * `model_path` — path to the ggml Whisper model file
-    /// * `mic_consumer` — ring buffer consumer for the microphone stream
-    /// * `system_consumer` — ring buffer consumer for the system audio stream
-    /// * `mic_sample_rate` — sample rate of the mic capture
-    /// * `mic_channels` — channel count of the mic capture
-    /// * `system_sample_rate` — sample rate of the system capture
-    /// * `system_channels` — channel count of the system capture
-    /// * `vad_threshold` — shared VAD threshold value
-    /// * `silence_timeout_seconds` — auto-stop after this many seconds of silence
-    /// * `initial_prompt` — optional prompt to guide Whisper (domain terms, names)
-    /// * `max_segment_seconds` — maximum segment duration before forced transcription
-    /// * `channel` — Tauri IPC channel for sending segments to the frontend
-    pub fn start(
-        model_path: std::path::PathBuf,
-        mic_consumer: HeapCons<f32>,
-        system_consumer: HeapCons<f32>,
-        mic_sample_rate: u32,
-        mic_channels: u16,
-        system_sample_rate: u32,
-        system_channels: u16,
-        vad_threshold: Arc<AtomicU32>,
-        silence_timeout_seconds: Option<u32>,
-        initial_prompt: Option<String>,
-        max_segment_seconds: u32,
-        channel: Channel<TranscriptSegment>,
-    ) -> Result<Self, String> {
+    /// * `config` — all configuration needed to run the worker (see [`WorkerConfig`])
+    pub fn start(config: WorkerConfig) -> Result<Self, String> {
         let running = Arc::new(AtomicBool::new(true));
         let running_clone = Arc::clone(&running);
         let paused = Arc::new(AtomicBool::new(false));
         let paused_clone = Arc::clone(&paused);
         let auto_stopped = Arc::new(AtomicBool::new(false));
         let auto_stopped_clone = Arc::clone(&auto_stopped);
-        let shared_segments: Arc<Mutex<Vec<TranscriptSegment>>> =
-            Arc::new(Mutex::new(Vec::new()));
+        let shared_segments: Arc<Mutex<Vec<TranscriptSegment>>> = Arc::new(Mutex::new(Vec::new()));
         let shared_segments_clone = Arc::clone(&shared_segments);
 
         let handle = thread::spawn(move || {
@@ -90,18 +96,7 @@ impl TranscriptionWorker {
                 paused_clone,
                 auto_stopped_clone,
                 shared_segments_clone,
-                model_path,
-                mic_consumer,
-                system_consumer,
-                mic_sample_rate,
-                mic_channels,
-                system_sample_rate,
-                system_channels,
-                vad_threshold,
-                silence_timeout_seconds,
-                initial_prompt,
-                max_segment_seconds,
-                channel,
+                config,
             )
         });
 
@@ -163,19 +158,23 @@ fn worker_loop(
     paused: Arc<AtomicBool>,
     auto_stopped: Arc<AtomicBool>,
     shared_segments: Arc<Mutex<Vec<TranscriptSegment>>>,
-    model_path: std::path::PathBuf,
-    mut mic_consumer: HeapCons<f32>,
-    mut system_consumer: HeapCons<f32>,
-    mic_sample_rate: u32,
-    mic_channels: u16,
-    system_sample_rate: u32,
-    system_channels: u16,
-    vad_threshold: Arc<AtomicU32>,
-    silence_timeout_seconds: Option<u32>,
-    initial_prompt: Option<String>,
-    max_segment_seconds: u32,
-    channel: Channel<TranscriptSegment>,
+    config: WorkerConfig,
 ) -> Vec<TranscriptSegment> {
+    let WorkerConfig {
+        model_path,
+        mut mic_consumer,
+        mut system_consumer,
+        mic_sample_rate,
+        mic_channels,
+        system_sample_rate,
+        system_channels,
+        vad_threshold,
+        silence_timeout_seconds,
+        initial_prompt,
+        max_segment_seconds,
+        channel,
+    } = config;
+
     // Load the Whisper model once for the lifetime of the worker
     let ctx = match WhisperContext::new_with_params(
         model_path.to_str().unwrap_or_default(),
@@ -197,8 +196,8 @@ fn worker_loop(
 
     // Helper: push a segment to both local and shared accumulators
     let push_segment = |seg: TranscriptSegment,
-                            all: &mut Vec<TranscriptSegment>,
-                            shared: &Arc<Mutex<Vec<TranscriptSegment>>>| {
+                        all: &mut Vec<TranscriptSegment>,
+                        shared: &Arc<Mutex<Vec<TranscriptSegment>>>| {
         if let Ok(mut shared_segs) = shared.lock() {
             shared_segs.push(seg.clone());
         }
@@ -250,14 +249,25 @@ fn worker_loop(
 
         // Process mic segment
         let mic_mono = pipeline::process_buffer(&mic_raw_buf, mic_sample_rate, mic_channels);
-        if should_transcribe(&mic_mono, &mut mic_had_speech, &mut mic_silence_count, threshold, segment_samples) {
+        if should_transcribe(
+            &mic_mono,
+            &mut mic_had_speech,
+            &mut mic_silence_count,
+            threshold,
+            segment_samples,
+        ) {
             let elapsed_ms = recording_start.elapsed().as_millis() as u64;
             if mic_had_speech {
                 // Prepend overlap from previous segment for word-boundary context
                 let audio = prepend_overlap(&mic_overlap, &mic_mono);
                 if let Some(seg) = transcribe_segment(
-                    &ctx, &audio, Speaker::Me, mic_segment_start_ms, elapsed_ms,
-                    initial_prompt.as_deref(), &channel,
+                    &ctx,
+                    &audio,
+                    Speaker::Me,
+                    mic_segment_start_ms,
+                    elapsed_ms,
+                    initial_prompt.as_deref(),
+                    &channel,
                 ) {
                     push_segment(seg, &mut all_segments, &shared_segments);
                 }
@@ -273,13 +283,24 @@ fn worker_loop(
         // Process system segment
         let system_mono =
             pipeline::process_buffer(&system_raw_buf, system_sample_rate, system_channels);
-        if should_transcribe(&system_mono, &mut system_had_speech, &mut system_silence_count, threshold, segment_samples) {
+        if should_transcribe(
+            &system_mono,
+            &mut system_had_speech,
+            &mut system_silence_count,
+            threshold,
+            segment_samples,
+        ) {
             let elapsed_ms = recording_start.elapsed().as_millis() as u64;
             if system_had_speech {
                 let audio = prepend_overlap(&system_overlap, &system_mono);
                 if let Some(seg) = transcribe_segment(
-                    &ctx, &audio, Speaker::Others, system_segment_start_ms, elapsed_ms,
-                    initial_prompt.as_deref(), &channel,
+                    &ctx,
+                    &audio,
+                    Speaker::Others,
+                    system_segment_start_ms,
+                    elapsed_ms,
+                    initial_prompt.as_deref(),
+                    &channel,
                 ) {
                     push_segment(seg, &mut all_segments, &shared_segments);
                 }
@@ -298,13 +319,8 @@ fn worker_loop(
 
         // Auto-stop if silence exceeds the configured timeout
         if let Some(timeout_secs) = silence_timeout_seconds {
-            if timeout_secs > 0
-                && last_speech_time.elapsed().as_secs() >= u64::from(timeout_secs)
-            {
-                eprintln!(
-                    "Auto-stopping: no speech for {} seconds",
-                    timeout_secs
-                );
+            if timeout_secs > 0 && last_speech_time.elapsed().as_secs() >= u64::from(timeout_secs) {
+                eprintln!("Auto-stopping: no speech for {} seconds", timeout_secs);
                 auto_stopped.store(true, Ordering::SeqCst);
                 running.store(false, Ordering::SeqCst);
             }
@@ -321,8 +337,13 @@ fn worker_loop(
     if !mic_mono.is_empty() && pipeline::is_speech(&mic_mono, threshold) {
         let audio = prepend_overlap(&mic_overlap, &mic_mono);
         if let Some(seg) = transcribe_segment(
-            &ctx, &audio, Speaker::Me, mic_segment_start_ms, elapsed_ms,
-            initial_prompt.as_deref(), &channel,
+            &ctx,
+            &audio,
+            Speaker::Me,
+            mic_segment_start_ms,
+            elapsed_ms,
+            initial_prompt.as_deref(),
+            &channel,
         ) {
             push_segment(seg, &mut all_segments, &shared_segments);
         }
@@ -333,8 +354,13 @@ fn worker_loop(
     if !system_mono.is_empty() && pipeline::is_speech(&system_mono, threshold) {
         let audio = prepend_overlap(&system_overlap, &system_mono);
         if let Some(seg) = transcribe_segment(
-            &ctx, &audio, Speaker::Others, system_segment_start_ms, elapsed_ms,
-            initial_prompt.as_deref(), &channel,
+            &ctx,
+            &audio,
+            Speaker::Others,
+            system_segment_start_ms,
+            elapsed_ms,
+            initial_prompt.as_deref(),
+            &channel,
         ) {
             push_segment(seg, &mut all_segments, &shared_segments);
         }
@@ -640,7 +666,13 @@ mod tests {
         let threshold = 0.01;
 
         // Act
-        let result = should_transcribe(&mono, &mut had_speech, &mut silence_count, threshold, TEST_SEGMENT_SAMPLES);
+        let result = should_transcribe(
+            &mono,
+            &mut had_speech,
+            &mut silence_count,
+            threshold,
+            TEST_SEGMENT_SAMPLES,
+        );
 
         // Assert
         assert!(result);
@@ -656,7 +688,13 @@ mod tests {
         let threshold = 0.01;
 
         // Act
-        let result = should_transcribe(&mono, &mut had_speech, &mut silence_count, threshold, custom_segment);
+        let result = should_transcribe(
+            &mono,
+            &mut had_speech,
+            &mut silence_count,
+            threshold,
+            custom_segment,
+        );
 
         // Assert
         assert!(result);
@@ -671,7 +709,13 @@ mod tests {
         let threshold = 0.01;
 
         // Act
-        let result = should_transcribe(&mono, &mut had_speech, &mut silence_count, threshold, TEST_SEGMENT_SAMPLES);
+        let result = should_transcribe(
+            &mono,
+            &mut had_speech,
+            &mut silence_count,
+            threshold,
+            TEST_SEGMENT_SAMPLES,
+        );
 
         // Assert
         assert!(!result);
@@ -692,7 +736,13 @@ mod tests {
         let threshold = 0.01;
 
         // Act
-        let result = should_transcribe(&mono, &mut had_speech, &mut silence_count, threshold, TEST_SEGMENT_SAMPLES);
+        let result = should_transcribe(
+            &mono,
+            &mut had_speech,
+            &mut silence_count,
+            threshold,
+            TEST_SEGMENT_SAMPLES,
+        );
 
         // Assert — speech detected but holdoff not yet expired
         assert!(!result);
@@ -709,7 +759,13 @@ mod tests {
         let threshold = 0.01;
 
         // Act — this poll should push silence_count to SILENCE_HOLDOFF
-        let result = should_transcribe(&mono, &mut had_speech, &mut silence_count, threshold, TEST_SEGMENT_SAMPLES);
+        let result = should_transcribe(
+            &mono,
+            &mut had_speech,
+            &mut silence_count,
+            threshold,
+            TEST_SEGMENT_SAMPLES,
+        );
 
         // Assert
         assert!(result);
@@ -729,7 +785,13 @@ mod tests {
         let threshold = 0.01;
 
         // Act
-        let _result = should_transcribe(&mono, &mut had_speech, &mut silence_count, threshold, TEST_SEGMENT_SAMPLES);
+        let _result = should_transcribe(
+            &mono,
+            &mut had_speech,
+            &mut silence_count,
+            threshold,
+            TEST_SEGMENT_SAMPLES,
+        );
 
         // Assert — silence count reset because speech was detected
         assert_eq!(silence_count, 0);
@@ -744,7 +806,13 @@ mod tests {
         let threshold = 0.01;
 
         // Act
-        let result = should_transcribe(&mono, &mut had_speech, &mut silence_count, threshold, TEST_SEGMENT_SAMPLES);
+        let result = should_transcribe(
+            &mono,
+            &mut had_speech,
+            &mut silence_count,
+            threshold,
+            TEST_SEGMENT_SAMPLES,
+        );
 
         // Assert — holdoff reached but buffer too short
         assert!(!result);

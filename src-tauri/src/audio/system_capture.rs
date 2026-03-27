@@ -59,8 +59,7 @@ fn parse_pactl_sources(pactl_output: &str) -> Vec<AudioDevice> {
                 let display_name = source_name
                     .replace("alsa_output.", "")
                     .replace(".monitor", "")
-                    .replace('.', " ")
-                    .replace('-', " ");
+                    .replace(['.', '-'], " ");
                 devices.push(AudioDevice {
                     id: source_name,
                     name: display_name,
@@ -187,9 +186,8 @@ fn capture_loop(
         }
 
         // Convert raw bytes to f32 samples
-        let samples: &[f32] = unsafe {
-            std::slice::from_raw_parts(byte_buf.as_ptr() as *const f32, READ_SAMPLES)
-        };
+        let samples: &[f32] =
+            unsafe { std::slice::from_raw_parts(byte_buf.as_ptr() as *const f32, READ_SAMPLES) };
 
         // Compute RMS
         if !samples.is_empty() {
