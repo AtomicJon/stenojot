@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { Button } from './Button';
+import { ButtonVariant } from './Button.const';
 
 describe('Button', () => {
   it('renders children text', () => {
@@ -42,18 +43,18 @@ describe('Button', () => {
     expect(handleClick).not.toHaveBeenCalled();
   });
 
-  it('applies the accent variant class by default', () => {
+  it('applies the default variant class by default', () => {
     // Arrange & Act
     render(<Button onClick={() => {}}>OK</Button>);
 
     // Assert
-    expect(screen.getByRole('button')).toHaveClass('accent');
+    expect(screen.getByRole('button')).toHaveClass('default');
   });
 
   it('applies the danger variant class', () => {
     // Arrange & Act
     render(
-      <Button onClick={() => {}} variant="danger">
+      <Button onClick={() => {}} variant={ButtonVariant.danger}>
         Delete
       </Button>,
     );
@@ -65,7 +66,7 @@ describe('Button', () => {
   it('applies the link variant class', () => {
     // Arrange & Act
     render(
-      <Button onClick={() => {}} variant="link">
+      <Button onClick={() => {}} variant={ButtonVariant.link}>
         Reset
       </Button>,
     );

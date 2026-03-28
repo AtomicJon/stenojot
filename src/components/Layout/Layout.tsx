@@ -5,6 +5,7 @@ import type { SummaryStatus } from '../../hooks/useRecording';
 import { useToast } from '../Toast';
 import { formatTime } from '../../lib/format';
 import s from './Layout.module.scss';
+import { Button, ButtonSize, ButtonVariant } from '../Button';
 
 /** App shell with top navigation, global recording controls, and consistent layout wrapping all routes. */
 export function Layout() {
@@ -66,20 +67,24 @@ export function Layout() {
               </div>
             )}
             {isRecording && (
-              <button
-                className={s.navPauseBtn}
+              <Button
+                variant={ButtonVariant.secondary}
+                size={ButtonSize.small}
                 onClick={isPaused ? handleResume : handlePause}
               >
                 {isPaused ? 'Resume' : 'Pause'}
-              </button>
+              </Button>
             )}
-            <button
-              className={`${s.navRecordBtn} ${isRecording ? s.navRecordBtnActive : ''}`}
+            <Button
+              variant={
+                isRecording ? ButtonVariant.danger : ButtonVariant.default
+              }
+              size={ButtonSize.small}
               onClick={isRecording ? handleStop : handleStart}
               disabled={!modelReady && !isRecording}
             >
               {isRecording ? 'Stop' : 'Record'}
-            </button>
+            </Button>
             <Link to="/meetings" className={s.navLink}>
               Meetings
             </Link>

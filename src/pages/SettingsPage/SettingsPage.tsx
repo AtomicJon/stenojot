@@ -19,7 +19,7 @@ import {
 } from '../../lib/commands';
 import { formatFileSize } from '../../lib/format';
 import { useRecording } from '../../hooks/useRecording';
-import { Button } from '../../components/Button';
+import { Button, ButtonVariant } from '../../components/Button';
 import { Panel } from '../../components/Panel';
 import { Select } from '../../components/Select';
 import type { ModelInfo } from '../../types';
@@ -372,7 +372,7 @@ export function SettingsPage() {
               </Button>
             )}
             {modelInfo.downloaded && (
-              <Button variant="danger" onClick={handleDelete}>
+              <Button variant={ButtonVariant.danger} onClick={handleDelete}>
                 Delete Model
               </Button>
             )}
@@ -401,7 +401,7 @@ export function SettingsPage() {
             </Button>
           </div>
 
-          <Button variant="link" onClick={handleResetPath}>
+          <Button variant={ButtonVariant.link} onClick={handleResetPath}>
             Reset to Default
           </Button>
         </Panel>
@@ -428,7 +428,7 @@ export function SettingsPage() {
             </Button>
           </div>
 
-          <Button variant="link" onClick={handleResetOutputDir}>
+          <Button variant={ButtonVariant.link} onClick={handleResetOutputDir}>
             Reset to Default
           </Button>
         </Panel>

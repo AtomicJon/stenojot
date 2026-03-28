@@ -1,40 +1,64 @@
 @use '../../styles' as *;
 
 .button {
-  padding: $space-10 $space-20;
-  font-size: $font-base;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-weight: $weight-semibold;
   font-family: inherit;
-  border: none;
+  line-height: 1;
+  border: $border-1 solid transparent;
   border-radius: $radius-8;
   cursor: pointer;
   transition:
     background-color 0.2s,
     color 0.2s;
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
 }
 
-.button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
+// ── Sizes ────────────────────────────────────
+.small {
+  padding: $space-6 $space-16;
+  font-size: $font-sm;
+}
+
+.medium {
+  padding: $space-10 $space-20;
+  font-size: $font-base;
 }
 
 // ── Variants ─────────────────────────────────
-.accent {
+.default {
   color: $color-text-inverse;
   background-color: $color-accent;
+
+  &:hover:not(:disabled) {
+    background-color: $color-accent-hover;
+  }
 }
 
-.accent:hover:not(:disabled) {
-  background-color: $color-accent-hover;
+.secondary {
+  color: $color-text-heading;
+  background-color: transparent;
+  border-color: $color-border;
+
+  &:hover:not(:disabled) {
+    background-color: $color-hover;
+    border-color: $color-text-secondary;
+  }
 }
 
 .danger {
   color: $color-text-white;
   background-color: $color-error;
-}
 
-.danger:hover:not(:disabled) {
-  background-color: $color-error-hover;
+  &:hover:not(:disabled) {
+    background-color: $color-error-hover;
+  }
 }
 
 .link {
@@ -43,8 +67,8 @@
   color: $color-text-muted;
   background: none;
   border-radius: 0;
-}
 
-.link:hover:not(:disabled) {
-  color: $color-accent;
+  &:hover:not(:disabled) {
+    color: $color-accent;
+  }
 }

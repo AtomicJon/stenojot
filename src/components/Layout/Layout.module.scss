@@ -81,57 +81,6 @@
   letter-spacing: 0.04em;
 }
 
-.navRecordBtn {
-  padding: $space-6 $space-16;
-  font-size: $font-sm;
-  font-weight: $weight-semibold;
-  font-family: inherit;
-  color: $color-text-inverse;
-  background-color: $color-accent;
-  border: none;
-  border-radius: $radius-8;
-  cursor: pointer;
-  transition: background-color 0.2s;
-}
-
-.navRecordBtn:hover {
-  background-color: $color-accent-hover;
-}
-
-.navRecordBtn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.navRecordBtnActive {
-  background-color: $color-recording;
-  color: $color-text-white;
-}
-
-.navRecordBtnActive:hover {
-  background-color: $color-recording-hover;
-}
-
-.navPauseBtn {
-  padding: $space-6 $space-16;
-  font-size: $font-sm;
-  font-weight: $weight-semibold;
-  font-family: inherit;
-  color: $color-text-heading;
-  background-color: transparent;
-  border: $border-1 solid $color-border;
-  border-radius: $radius-8;
-  cursor: pointer;
-  transition:
-    background-color 0.2s,
-    border-color 0.2s;
-}
-
-.navPauseBtn:hover {
-  background-color: $color-hover;
-  border-color: $color-text-secondary;
-}
-
 .recordingDotPaused {
   width: $dot-size;
   height: $dot-size;

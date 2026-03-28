@@ -47,9 +47,13 @@
 }
 
 .tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: $space-8 $space-16;
   font-size: $font-sm;
   font-weight: $weight-semibold;
+  line-height: 1;
   color: $color-text-secondary;
   background: none;
   border: $border-1 solid $color-border;
