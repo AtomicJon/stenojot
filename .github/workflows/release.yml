@@ -51,23 +51,13 @@ jobs:
       fail-fast: false
       # Each matrix entry is one platform build. os_name and arch_name are used
       # when renaming artifacts so release asset filenames are human-readable.
+      # Linux-only for now — macOS and Windows builds are disabled until
+      # platform-specific system audio capture is implemented.
       matrix:
         include:
           - platform: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             os_name: linux
-            arch_name: x86_64
-          - platform: macos-latest
-            target: aarch64-apple-darwin
-            os_name: macos
-            arch_name: aarch64
-          - platform: macos-latest
-            target: x86_64-apple-darwin
-            os_name: macos
-            arch_name: x86_64
-          - platform: windows-latest
-            target: x86_64-pc-windows-msvc
-            os_name: windows
             arch_name: x86_64
 
     runs-on: ${{ matrix.platform }}

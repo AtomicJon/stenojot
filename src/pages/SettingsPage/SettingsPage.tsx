@@ -324,6 +324,10 @@ export function SettingsPage() {
                   value: 'medium',
                   label: 'Medium (~1.5 GB — slower, high accuracy)',
                 },
+                {
+                  value: 'large-v3-turbo',
+                  label: 'Large V3 Turbo (~1.6 GB — fast, very accurate)',
+                },
               ]}
               onChange={handleModelChange}
               disabled={isRecording}

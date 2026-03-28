@@ -1,4 +1,9 @@
 pub mod capture;
 pub mod pipeline;
+#[cfg(target_os = "linux")]
+#[path = "system_capture_pulse.rs"]
+pub mod system_capture;
+#[cfg(not(target_os = "linux"))]
+#[path = "system_capture_stub.rs"]
 pub mod system_capture;
 pub mod types;

@@ -221,7 +221,7 @@ pub fn set_silence_timeout(seconds: u32, state: State<'_, Mutex<AppState>>) -> R
 
 /// Set and persist the Whisper model name.
 ///
-/// Valid model names: "tiny", "base", "small", "medium", "large".
+/// Valid model names: "tiny", "base", "small", "medium", "large", "large-v3-turbo".
 /// Quantized variants like "base-q5_1" and "small-q5_1" are also accepted.
 #[tauri::command]
 pub fn set_whisper_model(model: String, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
