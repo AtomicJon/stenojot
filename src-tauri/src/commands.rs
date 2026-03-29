@@ -600,15 +600,33 @@ pub fn set_models_dir(path: String, state: State<'_, Mutex<AppState>>) -> Result
 
 /// Download the currently selected Whisper model from Hugging Face.
 ///
-/// This is a blocking download. Returns the path to the downloaded
-/// model file on success.
+/// Spawns the download on a background thread and returns immediately.
+/// Emits `download-progress` events during the download, then either
+/// `download-complete` (with the file path) or `download-error` (with
+/// an error message) when finished.
 #[tauri::command]
-pub fn download_model(state: State<'_, Mutex<AppState>>) -> Result<String, String> {
+pub fn download_model(
+    app: tauri::AppHandle,
+    state: State<'_, Mutex<AppState>>,
+) -> Result<(), String> {
     let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
     let model_name = app_state.whisper_model.clone();
-    drop(app_state); // Release lock before blocking download
-    let path = manager::download_model_file(&model_name)?;
-    Ok(path.to_string_lossy().to_string())
+    drop(app_state); // Release lock before spawning
+
+    let app_handle = app.clone();
+    std::thread::spawn(
+        move || match manager::download_model_file(&model_name, &app_handle) {
+            Ok(path) => {
+                let _ = app_handle.emit("download-complete", path.to_string_lossy().to_string());
+            }
+            Err(e) => {
+                eprintln!("Model download failed: {}", e);
+                let _ = app_handle.emit("download-error", e);
+            }
+        },
+    );
+
+    Ok(())
 }
 
 /// List meetings in the output directory.

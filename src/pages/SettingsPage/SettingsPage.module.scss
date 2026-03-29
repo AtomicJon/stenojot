@@ -98,6 +98,37 @@
   gap: $space-12;
 }
 
+// ── Download progress ───────────────────────────
+.progressWrapper {
+  display: flex;
+  flex-direction: column;
+  gap: $space-6;
+}
+
+.progressTrack {
+  position: relative;
+  width: 100%;
+  height: $space-8;
+  background-color: $color-bg;
+  border-radius: $radius-5;
+  overflow: hidden;
+}
+
+.progressFill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background-color: $color-accent;
+  border-radius: $radius-5;
+}
+
+.progressLabel {
+  font-size: $font-xs;
+  font-family: $font-mono;
+  color: $color-text-secondary;
+}
+
 // ── Storage Location ────────────────────────────
 .sectionDesc {
   font-size: $font-base;

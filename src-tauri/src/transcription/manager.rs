@@ -10,12 +10,22 @@ use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use tauri::Emitter;
 
 /// Base URL for downloading ggml Whisper models from Hugging Face.
 const HF_BASE_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
 
 /// Optional override for the models storage directory.
 static CUSTOM_MODELS_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+/// Event payload emitted during model downloads to report progress.
+#[derive(Clone, Serialize)]
+pub struct DownloadProgress {
+    /// Bytes downloaded so far.
+    pub bytes_downloaded: u64,
+    /// Total file size in bytes (0 if the server did not send Content-Length).
+    pub total_bytes: u64,
+}
 
 /// Detailed information about a Whisper model file.
 #[derive(Serialize)]
@@ -137,9 +147,10 @@ pub fn delete_model(model_name: &str) -> Result<(), String> {
 
 /// Downloads the model file from Hugging Face to the local models directory.
 ///
-/// Creates the models directory if it does not exist. Uses a streaming
-/// download to avoid holding the entire file in memory.
-pub fn download_model_file(model_name: &str) -> Result<PathBuf, String> {
+/// Creates the models directory if it does not exist. Streams the download
+/// in chunks, emitting `download-progress` events via the provided
+/// [`tauri::AppHandle`] so the frontend can display a progress bar.
+pub fn download_model_file(model_name: &str, app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let path = get_model_path(model_name);
 
     if path.exists() {
@@ -165,15 +176,56 @@ pub fn download_model_file(model_name: &str) -> Result<PathBuf, String> {
         ));
     }
 
-    let bytes = response
-        .bytes()
-        .map_err(|e| format!("Failed to read response body: {}", e))?;
+    let total_bytes = response.content_length().unwrap_or(0);
+    let mut bytes_downloaded: u64 = 0;
+    let mut last_emitted = std::time::Instant::now();
 
     let mut file =
         fs::File::create(&path).map_err(|e| format!("Failed to create model file: {}", e))?;
 
-    file.write_all(&bytes)
-        .map_err(|e| format!("Failed to write model file: {}", e))?;
+    // Emit initial progress (0%)
+    let _ = app.emit(
+        "download-progress",
+        DownloadProgress {
+            bytes_downloaded: 0,
+            total_bytes,
+        },
+    );
+
+    let mut reader = std::io::BufReader::new(response);
+    let mut buf = [0u8; 128 * 1024]; // 128 KiB chunks
+    loop {
+        let n = std::io::Read::read(&mut reader, &mut buf)
+            .map_err(|e| format!("Failed to read response body: {}", e))?;
+        if n == 0 {
+            break;
+        }
+        file.write_all(&buf[..n])
+            .map_err(|e| format!("Failed to write model file: {}", e))?;
+        bytes_downloaded += n as u64;
+
+        // Throttle progress events to avoid flooding the frontend
+        let now = std::time::Instant::now();
+        if now.duration_since(last_emitted).as_millis() >= 100 {
+            last_emitted = now;
+            let _ = app.emit(
+                "download-progress",
+                DownloadProgress {
+                    bytes_downloaded,
+                    total_bytes,
+                },
+            );
+        }
+    }
+
+    // Emit final 100% progress
+    let _ = app.emit(
+        "download-progress",
+        DownloadProgress {
+            bytes_downloaded,
+            total_bytes,
+        },
+    );
 
     eprintln!("Model saved to {}", path.display());
     Ok(path)
@@ -325,6 +377,7 @@ mod tests {
     fn set_models_dir_creates_directory() {
         // Arrange
         let tmp = tempfile::tempdir().unwrap();
+        let _guard = lock_with_temp_dir(tmp.path());
         let new_dir = tmp.path().join("custom_models");
         assert!(!new_dir.exists());
 

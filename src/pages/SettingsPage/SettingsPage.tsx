@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { listen } from '@tauri-apps/api/event';
 import {
   getModelInfo,
   downloadModel,
@@ -25,6 +26,12 @@ import { Select } from '../../components/Select';
 import type { ModelInfo } from '../../types';
 import s from './SettingsPage.module.scss';
 
+/** Payload emitted by the Rust backend during model downloads. */
+interface DownloadProgress {
+  bytes_downloaded: number;
+  total_bytes: number;
+}
+
 /** Settings page for managing audio sources, transcription model, and storage location. */
 export function SettingsPage() {
   const {
@@ -40,6 +47,9 @@ export function SettingsPage() {
 
   const [modelInfo, setModelInfo] = useState<ModelInfo | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] =
+    useState<DownloadProgress | null>(null);
+  const [downloadGeneration, setDownloadGeneration] = useState(0);
   const [customPath, setCustomPath] = useState('');
   const [pathSaved, setPathSaved] = useState(false);
   const [outputDir, setOutputDirState] = useState('');
@@ -70,13 +80,15 @@ export function SettingsPage() {
   }, []);
 
   useEffect(() => {
-    loadModelInfo();
-    async function loadOutputSettings() {
+    async function loadInitialSettings() {
       try {
-        const [dir, settings] = await Promise.all([
+        const [info, dir, settings] = await Promise.all([
+          getModelInfo(),
           getOutputDir(),
           getSettings(),
         ]);
+        setModelInfo(info);
+        setCustomPath(info.models_dir);
         setOutputDirState(dir);
         setSilenceTimeoutState(settings.silence_timeout_seconds ?? 0);
         setWhisperModelState(settings.whisper_model);
@@ -88,25 +100,64 @@ export function SettingsPage() {
         setLlmBaseUrlValue(settings.llm_base_url ?? '');
         setAutoSummaryValue(settings.auto_summary);
       } catch (err) {
-        console.error('Failed to load output settings:', err);
+        console.error('Failed to load settings:', err);
       }
     }
-    loadOutputSettings();
-  }, [loadModelInfo]);
+    loadInitialSettings();
+  }, []);
 
-  /** Download the Whisper transcription model. */
+  /** Subscribe to download events while this page is mounted. */
+  useEffect(() => {
+    const progressPromise = listen<DownloadProgress>(
+      'download-progress',
+      (event) => {
+        setDownloadProgress(event.payload);
+      },
+    );
+    const completePromise = listen('download-complete', () => {
+      setIsDownloading(false);
+      setDownloadProgress(null);
+      setDownloadGeneration((g) => g + 1);
+    });
+    const errorPromise = listen<string>('download-error', (event) => {
+      console.error('Model download failed:', event.payload);
+      setIsDownloading(false);
+      setDownloadProgress(null);
+    });
+    return () => {
+      progressPromise.then((u) => u());
+      completePromise.then((u) => u());
+      errorPromise.then((u) => u());
+    };
+  }, []);
+
+  /** Reload model info after a successful download. */
+  useEffect(() => {
+    if (downloadGeneration === 0) return;
+    async function reload() {
+      try {
+        const info = await getModelInfo();
+        setModelInfo(info);
+        setCustomPath(info.models_dir);
+      } catch (err) {
+        console.error('Failed to reload model info:', err);
+      }
+      refreshModelStatus();
+    }
+    reload();
+  }, [downloadGeneration, refreshModelStatus]);
+
+  /** Kick off a background model download. */
   const handleDownload = useCallback(async () => {
     setIsDownloading(true);
+    setDownloadProgress(null);
     try {
       await downloadModel();
-      await loadModelInfo();
-      await refreshModelStatus();
     } catch (err) {
-      console.error('Failed to download model:', err);
-    } finally {
+      console.error('Failed to start model download:', err);
       setIsDownloading(false);
     }
-  }, [loadModelInfo, refreshModelStatus]);
+  }, []);
 
   /** Delete the Whisper transcription model file. */
   const handleDelete = useCallback(async () => {
@@ -368,7 +419,7 @@ export function SettingsPage() {
           <div className={s.actions}>
             {!modelInfo.downloaded && (
               <Button onClick={handleDownload} disabled={isDownloading}>
-                {isDownloading ? 'Downloading...' : 'Download Model'}
+                {isDownloading ? 'Downloading\u2026' : 'Download Model'}
               </Button>
             )}
             {modelInfo.downloaded && (
@@ -377,6 +428,27 @@ export function SettingsPage() {
               </Button>
             )}
           </div>
+
+          {isDownloading && downloadProgress && (
+            <div className={s.progressWrapper}>
+              <div className={s.progressTrack}>
+                <div
+                  className={s.progressFill}
+                  style={{
+                    width:
+                      downloadProgress.total_bytes > 0
+                        ? `${(downloadProgress.bytes_downloaded / downloadProgress.total_bytes) * 100}%`
+                        : '0%',
+                  }}
+                />
+              </div>
+              <span className={s.progressLabel}>
+                {downloadProgress.total_bytes > 0
+                  ? `${formatFileSize(downloadProgress.bytes_downloaded)} / ${formatFileSize(downloadProgress.total_bytes)} (${Math.round((downloadProgress.bytes_downloaded / downloadProgress.total_bytes) * 100)}%)`
+                  : `${formatFileSize(downloadProgress.bytes_downloaded)} downloaded`}
+              </span>
+            </div>
+          )}
         </Panel>
 
         {/* Storage Location */}
