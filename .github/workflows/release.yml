@@ -144,7 +144,7 @@ jobs:
       # platform's artifacts. All matrix jobs upload to the same release
       # concurrently — softprops/action-gh-release handles this safely.
       - name: Upload to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v2.6.1
         with:
           name: StenoJot ${{ github.ref_name }}
           files: release-artifacts/*
