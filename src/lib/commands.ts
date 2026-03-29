@@ -3,6 +3,7 @@ import type {
   AudioDevice,
   AudioLevels,
   MeetingEntry,
+  ModelEntry,
   ModelInfo,
   PersistedSettings,
   StartRecordingResult,
@@ -114,13 +115,13 @@ export function setPreferredSystemDevice(deviceId: string): Promise<void> {
   return invoke('set_preferred_system_device', { deviceId });
 }
 
-/** Retrieve detailed information about the Whisper transcription model. */
+/** Retrieve detailed information about the active transcription model. */
 export function getModelInfo(): Promise<ModelInfo> {
   return invoke<ModelInfo>('get_model_info');
 }
 
 /**
- * Check whether the Whisper transcription model is downloaded and ready.
+ * Check whether the active transcription model is downloaded and ready.
  * Uses `get_model_info` internally and returns the `downloaded` flag.
  */
 export async function checkModelStatus(): Promise<boolean> {
@@ -128,12 +129,12 @@ export async function checkModelStatus(): Promise<boolean> {
   return info.downloaded;
 }
 
-/** Download the Whisper transcription model. */
+/** Download the active transcription model. */
 export function downloadModel(): Promise<void> {
   return invoke('download_model');
 }
 
-/** Delete the Whisper transcription model file. */
+/** Delete the active transcription model. */
 export function deleteModel(): Promise<void> {
   return invoke('delete_model');
 }
@@ -176,6 +177,30 @@ export function setSilenceTimeout(seconds: number): Promise<void> {
  */
 export function setWhisperModel(model: string): Promise<void> {
   return invoke('set_whisper_model', { model });
+}
+
+/**
+ * Set and persist the active STT engine.
+ * @param engine - Engine identifier ("whisper", "parakeet", "moonshine", "sensevoice")
+ */
+export function setSttEngine(engine: string): Promise<void> {
+  return invoke('set_stt_engine', { engine });
+}
+
+/**
+ * Set and persist the model for the current non-Whisper STT engine.
+ * @param model - Model identifier
+ */
+export function setSttModel(model: string): Promise<void> {
+  return invoke('set_stt_model', { model });
+}
+
+/**
+ * List available models for a given STT engine.
+ * @param engine - Engine identifier ("whisper", "parakeet", "moonshine", "sensevoice")
+ */
+export function getEngineModels(engine: string): Promise<ModelEntry[]> {
+  return invoke<ModelEntry[]>('get_engine_models', { engine });
 }
 
 /**

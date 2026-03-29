@@ -1,9 +1,13 @@
-//! Whisper model management: storage paths, existence checks, and downloads.
+//! Model management: storage paths, existence checks, downloads, and registry.
 //!
 //! Models are stored in a configurable directory (defaulting to
 //! `~/.local/share/stenojot/models/`) and downloaded from Hugging Face on
 //! first use. The storage location can be overridden at runtime via
 //! [`set_models_dir`] and reset back to the default with [`reset_models_dir`].
+//!
+//! Whisper models are single GGML files. ONNX models (Parakeet, Moonshine,
+//! SenseVoice) are directories containing multiple files managed by the
+//! `transcribe-rs` crate.
 
 use serde::Serialize;
 use std::fs;
@@ -11,6 +15,8 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::Emitter;
+
+use super::engine::SttEngine;
 
 /// Base URL for downloading ggml Whisper models from Hugging Face.
 const HF_BASE_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
@@ -27,19 +33,123 @@ pub struct DownloadProgress {
     pub total_bytes: u64,
 }
 
-/// Detailed information about a Whisper model file.
+/// Detailed information about a model file or directory.
 #[derive(Serialize)]
 pub struct ModelInfo {
     /// Model name (e.g. `"base"`).
     pub name: String,
-    /// Absolute path where the model file is (or would be) stored.
+    /// Absolute path where the model file/directory is (or would be) stored.
     pub path: String,
-    /// Whether the model file exists on disk.
+    /// Whether the model file/directory exists on disk.
     pub downloaded: bool,
-    /// File size in bytes (0 if not downloaded).
+    /// File size in bytes (0 if not downloaded). For ONNX models this is
+    /// the total size of the model directory.
     pub size_bytes: u64,
     /// Directory containing model files.
     pub models_dir: String,
+    /// The STT engine this model belongs to.
+    pub engine: String,
+}
+
+/// A catalog entry describing an available model.
+#[derive(Clone, Serialize)]
+pub struct ModelEntry {
+    /// Model identifier used in settings (e.g. `"base"`, `"parakeet-tdt-0.6b"`).
+    pub id: String,
+    /// Human-readable label for the UI.
+    pub label: String,
+    /// The STT engine this model belongs to.
+    pub engine: SttEngine,
+    /// HuggingFace repository ID for ONNX models (used by `transcribe-rs`).
+    /// `None` for Whisper GGML models which use direct URL downloads.
+    pub hf_repo: Option<String>,
+}
+
+/// Returns the catalog of available models for a given engine.
+pub fn get_engine_models(engine: SttEngine) -> Vec<ModelEntry> {
+    match engine {
+        SttEngine::Whisper => vec![
+            ModelEntry {
+                id: "tiny".to_string(),
+                label: "Tiny (~75 MB — fastest, least accurate)".to_string(),
+                engine: SttEngine::Whisper,
+                hf_repo: None,
+            },
+            ModelEntry {
+                id: "base".to_string(),
+                label: "Base (~142 MB — fast, good accuracy)".to_string(),
+                engine: SttEngine::Whisper,
+                hf_repo: None,
+            },
+            ModelEntry {
+                id: "small".to_string(),
+                label: "Small (~466 MB — balanced)".to_string(),
+                engine: SttEngine::Whisper,
+                hf_repo: None,
+            },
+            ModelEntry {
+                id: "medium".to_string(),
+                label: "Medium (~1.5 GB — slower, high accuracy)".to_string(),
+                engine: SttEngine::Whisper,
+                hf_repo: None,
+            },
+            ModelEntry {
+                id: "large-v3-turbo".to_string(),
+                label: "Large V3 Turbo (~1.6 GB — fast, very accurate)".to_string(),
+                engine: SttEngine::Whisper,
+                hf_repo: None,
+            },
+            ModelEntry {
+                id: "distil-large-v3.5".to_string(),
+                label: "Distil Large V3.5 (~756 MB — 2x faster, near large accuracy)".to_string(),
+                engine: SttEngine::Whisper,
+                hf_repo: None,
+            },
+        ],
+        SttEngine::Parakeet => vec![ModelEntry {
+            id: "parakeet-tdt-0.6b".to_string(),
+            label: "Parakeet TDT 0.6B (~600 MB — fastest, excellent accuracy)".to_string(),
+            engine: SttEngine::Parakeet,
+            hf_repo: Some("nvidia/parakeet-tdt-0.6b-v2".to_string()),
+        }],
+        SttEngine::Moonshine => vec![
+            ModelEntry {
+                id: "moonshine-tiny".to_string(),
+                label: "Moonshine Tiny (~36 MB — ultra-light, edge-optimized)".to_string(),
+                engine: SttEngine::Moonshine,
+                hf_repo: Some("UsefulSensors/moonshine-tiny".to_string()),
+            },
+            ModelEntry {
+                id: "moonshine-base".to_string(),
+                label: "Moonshine Base (~90 MB — light, good accuracy)".to_string(),
+                engine: SttEngine::Moonshine,
+                hf_repo: Some("UsefulSensors/moonshine-base".to_string()),
+            },
+        ],
+        SttEngine::SenseVoice => vec![ModelEntry {
+            id: "sensevoice-small".to_string(),
+            label: "SenseVoice Small (~500 MB — multi-language, emotion detection)".to_string(),
+            engine: SttEngine::SenseVoice,
+            hf_repo: Some("FunAudioLLM/SenseVoiceSmall".to_string()),
+        }],
+    }
+}
+
+/// Look up a model entry by its ID across all engines.
+pub fn find_model_entry(model_id: &str) -> Option<ModelEntry> {
+    for engine in &[
+        SttEngine::Whisper,
+        SttEngine::Parakeet,
+        SttEngine::Moonshine,
+        SttEngine::SenseVoice,
+    ] {
+        for entry in get_engine_models(*engine) {
+            if entry.id == model_id {
+                return Some(entry);
+            }
+        }
+    }
+    None
 }
 
 /// Override the directory where Whisper models are stored.
@@ -96,41 +206,106 @@ fn dirs_like_home() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from("/tmp"))
 }
 
-/// Returns the expected filesystem path for a given model name (e.g. `"base"`).
+/// Returns the expected filesystem path for a Whisper GGML model.
 pub fn get_model_path(model_name: &str) -> PathBuf {
     get_models_dir().join(format!("ggml-{}.bin", model_name))
 }
 
-/// Checks whether the model file already exists on disk.
+/// Returns the expected filesystem path for an ONNX model directory.
+pub fn get_onnx_model_path(model_id: &str) -> PathBuf {
+    get_models_dir().join("onnx").join(model_id)
+}
+
+/// Returns the path for a model, choosing the right format based on engine.
+pub fn get_engine_model_path(engine: SttEngine, model_id: &str) -> PathBuf {
+    match engine {
+        SttEngine::Whisper => get_model_path(model_id),
+        _ => get_onnx_model_path(model_id),
+    }
+}
+
+/// Checks whether the model file/directory already exists on disk.
 pub fn model_exists(model_name: &str) -> bool {
     get_model_path(model_name).exists()
 }
 
+/// Checks whether an ONNX model directory exists on disk.
+pub fn onnx_model_exists(model_id: &str) -> bool {
+    get_onnx_model_path(model_id).is_dir()
+}
+
+/// Checks whether a model exists for the given engine.
+pub fn engine_model_exists(engine: SttEngine, model_id: &str) -> bool {
+    match engine {
+        SttEngine::Whisper => model_exists(model_id),
+        _ => onnx_model_exists(model_id),
+    }
+}
+
 /// Returns the Hugging Face download URL for the given model name.
+///
+/// Most models follow the `ggerganov/whisper.cpp` naming convention, but
+/// some (e.g. distil-whisper variants) are hosted in separate repositories
+/// with different filenames.
 pub fn get_download_url(model_name: &str) -> String {
-    format!("{}/ggml-{}.bin", HF_BASE_URL, model_name)
+    match model_name {
+        "distil-large-v3.5" => {
+            "https://huggingface.co/distil-whisper/distil-large-v3.5-ggml/resolve/main/ggml-model.bin".to_string()
+        }
+        _ => format!("{}/ggml-{}.bin", HF_BASE_URL, model_name),
+    }
 }
 
 /// Returns detailed information about a Whisper model.
 ///
-/// Includes the model path, download status, file size, and the active
-/// models directory.
+/// Convenience wrapper around [`get_engine_model_info`] for the Whisper engine.
+#[allow(dead_code)]
 pub fn get_model_info(model_name: &str) -> ModelInfo {
-    let path = get_model_path(model_name);
-    let downloaded = path.exists();
+    get_engine_model_info(SttEngine::Whisper, model_name)
+}
+
+/// Returns detailed information about a model for a specific engine.
+pub fn get_engine_model_info(engine: SttEngine, model_id: &str) -> ModelInfo {
+    let path = get_engine_model_path(engine, model_id);
+    let downloaded = match engine {
+        SttEngine::Whisper => path.exists(),
+        _ => path.is_dir(),
+    };
     let size_bytes = if downloaded {
-        fs::metadata(&path).map(|m| m.len()).unwrap_or(0)
+        match engine {
+            SttEngine::Whisper => fs::metadata(&path).map(|m| m.len()).unwrap_or(0),
+            _ => dir_size(&path),
+        }
     } else {
         0
     };
 
     ModelInfo {
-        name: model_name.to_string(),
+        name: model_id.to_string(),
         path: path.to_string_lossy().to_string(),
         downloaded,
         size_bytes,
         models_dir: get_models_dir().to_string_lossy().to_string(),
+        engine: engine.to_string(),
     }
+}
+
+/// Recursively compute the total size of a directory in bytes.
+fn dir_size(path: &PathBuf) -> u64 {
+    let mut total = 0u64;
+    if let Ok(entries) = fs::read_dir(path) {
+        for entry in entries.flatten() {
+            let meta = entry.metadata();
+            if let Ok(m) = meta {
+                if m.is_file() {
+                    total += m.len();
+                } else if m.is_dir() {
+                    total += dir_size(&entry.path());
+                }
+            }
+        }
+    }
+    total
 }
 
 /// Delete the model file for the given model name.
@@ -229,6 +404,111 @@ pub fn download_model_file(model_name: &str, app: &tauri::AppHandle) -> Result<P
 
     eprintln!("Model saved to {}", path.display());
     Ok(path)
+}
+
+/// Downloads an ONNX model using `transcribe-rs`.
+///
+/// The model is downloaded from HuggingFace into the ONNX models
+/// subdirectory. Progress events are emitted as "downloading" (start)
+/// and the final result.
+pub fn download_onnx_model(
+    engine: SttEngine,
+    model_id: &str,
+    app: &tauri::AppHandle,
+) -> Result<PathBuf, String> {
+    let model_dir = get_onnx_model_path(model_id);
+
+    if model_dir.is_dir() {
+        return Ok(model_dir);
+    }
+
+    let entry = find_model_entry(model_id).ok_or_else(|| format!("Unknown model: {}", model_id))?;
+
+    let hf_repo = entry
+        .hf_repo
+        .ok_or_else(|| format!("Model {} has no HuggingFace repo configured", model_id))?;
+
+    // Emit indeterminate progress (ONNX downloads are managed by transcribe-rs,
+    // so we can't easily report granular progress)
+    let _ = app.emit(
+        "download-progress",
+        DownloadProgress {
+            bytes_downloaded: 0,
+            total_bytes: 0,
+        },
+    );
+
+    eprintln!("Downloading ONNX model {} from {} ...", model_id, hf_repo);
+
+    // Use transcribe-rs model loading which handles downloading from HuggingFace.
+    // Each model type's `load` will download if not present locally.
+    // We set the ONNX model cache directory so models land in our models dir.
+    fs::create_dir_all(&model_dir)
+        .map_err(|e| format!("Failed to create ONNX model directory: {}", e))?;
+
+    // For ONNX models, we delegate to transcribe-rs which handles
+    // downloading from HuggingFace via the ort crate's model loading.
+    // The model_dir is where the files will be stored.
+    let quantization = transcribe_rs::onnx::Quantization::default();
+
+    match engine {
+        SttEngine::Parakeet => {
+            transcribe_rs::onnx::parakeet::ParakeetModel::load(&model_dir, &quantization)
+                .map_err(|e| format!("Failed to download Parakeet model: {}", e))?;
+        }
+        SttEngine::Moonshine => {
+            let variant = if model_id.contains("base") {
+                transcribe_rs::onnx::moonshine::MoonshineVariant::Base
+            } else {
+                transcribe_rs::onnx::moonshine::MoonshineVariant::Tiny
+            };
+            transcribe_rs::onnx::moonshine::MoonshineModel::load(
+                &model_dir,
+                variant,
+                &quantization,
+            )
+            .map_err(|e| format!("Failed to download Moonshine model: {}", e))?;
+        }
+        SttEngine::SenseVoice => {
+            transcribe_rs::onnx::sense_voice::SenseVoiceModel::load(&model_dir, &quantization)
+                .map_err(|e| format!("Failed to download SenseVoice model: {}", e))?;
+        }
+        SttEngine::Whisper => {
+            return Err("Use download_model_file for Whisper models".to_string());
+        }
+    }
+
+    // Emit completion
+    let size = dir_size(&model_dir);
+    let _ = app.emit(
+        "download-progress",
+        DownloadProgress {
+            bytes_downloaded: size,
+            total_bytes: size,
+        },
+    );
+
+    eprintln!("ONNX model saved to {}", model_dir.display());
+    Ok(model_dir)
+}
+
+/// Delete a model for any engine.
+pub fn delete_engine_model(engine: SttEngine, model_id: &str) -> Result<(), String> {
+    match engine {
+        SttEngine::Whisper => delete_model(model_id),
+        _ => {
+            let path = get_onnx_model_path(model_id);
+            if !path.is_dir() {
+                return Err(format!(
+                    "ONNX model directory does not exist: {}",
+                    path.display()
+                ));
+            }
+            fs::remove_dir_all(&path)
+                .map_err(|e| format!("Failed to delete ONNX model directory: {}", e))?;
+            Ok(())
+        }
+    }
 }
 
 #[cfg(test)]
@@ -423,6 +703,165 @@ mod tests {
         assert_eq!(
             url,
             "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
+        );
+    }
+
+    #[test]
+    fn get_engine_model_path_whisper_uses_ggml_format() {
+        // Arrange
+        let tmp = tempfile::tempdir().unwrap();
+        let _guard = lock_with_temp_dir(tmp.path());
+
+        // Act
+        let path = get_engine_model_path(SttEngine::Whisper, "base");
+
+        // Assert
+        assert_eq!(path.file_name().unwrap(), "ggml-base.bin");
+
+        // Cleanup
+        clear_custom_dir();
+    }
+
+    #[test]
+    fn get_engine_model_path_onnx_uses_subdirectory() {
+        // Arrange
+        let tmp = tempfile::tempdir().unwrap();
+        let _guard = lock_with_temp_dir(tmp.path());
+
+        // Act
+        let path = get_engine_model_path(SttEngine::Parakeet, "parakeet-tdt-0.6b");
+
+        // Assert
+        assert!(path.ends_with("onnx/parakeet-tdt-0.6b"));
+
+        // Cleanup
+        clear_custom_dir();
+    }
+
+    #[test]
+    fn engine_model_exists_checks_directory_for_onnx() {
+        // Arrange
+        let tmp = tempfile::tempdir().unwrap();
+        let _guard = lock_with_temp_dir(tmp.path());
+        let onnx_dir = tmp.path().join("onnx").join("moonshine-tiny");
+        fs::create_dir_all(&onnx_dir).unwrap();
+
+        // Act
+        let exists = engine_model_exists(SttEngine::Moonshine, "moonshine-tiny");
+
+        // Assert
+        assert!(exists);
+
+        // Cleanup
+        clear_custom_dir();
+    }
+
+    #[test]
+    fn get_engine_models_returns_models_for_each_engine() {
+        // Arrange / Act / Assert
+        let whisper = get_engine_models(SttEngine::Whisper);
+        assert!(whisper.len() >= 5);
+        assert!(whisper.iter().any(|m| m.id == "base"));
+        assert!(whisper.iter().any(|m| m.id == "distil-large-v3.5"));
+
+        let parakeet = get_engine_models(SttEngine::Parakeet);
+        assert!(!parakeet.is_empty());
+        assert!(parakeet[0].hf_repo.is_some());
+
+        let moonshine = get_engine_models(SttEngine::Moonshine);
+        assert!(moonshine.len() >= 2);
+
+        let sensevoice = get_engine_models(SttEngine::SenseVoice);
+        assert!(!sensevoice.is_empty());
+    }
+
+    #[test]
+    fn find_model_entry_finds_whisper_model() {
+        // Arrange / Act
+        let entry = find_model_entry("base");
+
+        // Assert
+        assert!(entry.is_some());
+        let entry = entry.unwrap();
+        assert_eq!(entry.engine, SttEngine::Whisper);
+        assert!(entry.hf_repo.is_none());
+    }
+
+    #[test]
+    fn find_model_entry_finds_onnx_model() {
+        // Arrange / Act
+        let entry = find_model_entry("parakeet-tdt-0.6b");
+
+        // Assert
+        assert!(entry.is_some());
+        let entry = entry.unwrap();
+        assert_eq!(entry.engine, SttEngine::Parakeet);
+        assert!(entry.hf_repo.is_some());
+    }
+
+    #[test]
+    fn find_model_entry_returns_none_for_unknown() {
+        // Arrange / Act
+        let entry = find_model_entry("nonexistent-model");
+
+        // Assert
+        assert!(entry.is_none());
+    }
+
+    #[test]
+    fn delete_engine_model_removes_onnx_directory() {
+        // Arrange
+        let tmp = tempfile::tempdir().unwrap();
+        let _guard = lock_with_temp_dir(tmp.path());
+        let onnx_dir = tmp.path().join("onnx").join("moonshine-tiny");
+        fs::create_dir_all(&onnx_dir).unwrap();
+        fs::write(onnx_dir.join("model.onnx"), b"fake").unwrap();
+
+        // Act
+        let result = delete_engine_model(SttEngine::Moonshine, "moonshine-tiny");
+
+        // Assert
+        assert!(result.is_ok());
+        assert!(!onnx_dir.exists());
+
+        // Cleanup
+        clear_custom_dir();
+    }
+
+    #[test]
+    fn get_engine_model_info_onnx_shows_directory_size() {
+        // Arrange
+        let tmp = tempfile::tempdir().unwrap();
+        let _guard = lock_with_temp_dir(tmp.path());
+        let onnx_dir = tmp.path().join("onnx").join("moonshine-tiny");
+        fs::create_dir_all(&onnx_dir).unwrap();
+        fs::write(onnx_dir.join("model.onnx"), vec![0u8; 2048]).unwrap();
+        fs::write(onnx_dir.join("vocab.txt"), vec![0u8; 512]).unwrap();
+
+        // Act
+        let info = get_engine_model_info(SttEngine::Moonshine, "moonshine-tiny");
+
+        // Assert
+        assert!(info.downloaded);
+        assert_eq!(info.size_bytes, 2560);
+        assert_eq!(info.engine, "moonshine");
+
+        // Cleanup
+        clear_custom_dir();
+    }
+
+    #[test]
+    fn get_download_url_uses_custom_url_for_distil() {
+        // Arrange
+        let model_name = "distil-large-v3.5";
+
+        // Act
+        let url = get_download_url(model_name);
+
+        // Assert
+        assert_eq!(
+            url,
+            "https://huggingface.co/distil-whisper/distil-large-v3.5-ggml/resolve/main/ggml-model.bin"
         );
     }
 }

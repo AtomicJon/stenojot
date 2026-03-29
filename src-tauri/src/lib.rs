@@ -41,7 +41,9 @@ pub fn run() {
 
             app_state.output_dir = persisted.output_dir;
             app_state.silence_timeout_seconds = persisted.silence_timeout_seconds;
+            app_state.stt_engine = persisted.stt_engine;
             app_state.whisper_model = persisted.whisper_model;
+            app_state.stt_model = persisted.stt_model;
             app_state.initial_prompt = persisted.initial_prompt;
             app_state.max_segment_seconds = persisted.max_segment_seconds;
             app_state.llm_provider = persisted.llm_provider;
@@ -85,6 +87,9 @@ pub fn run() {
             commands::resume_recording,
             commands::save_current_transcript,
             commands::set_whisper_model,
+            commands::set_stt_engine,
+            commands::set_stt_model,
+            commands::get_engine_models,
             commands::set_initial_prompt,
             commands::set_max_segment_seconds,
             commands::set_llm_provider,

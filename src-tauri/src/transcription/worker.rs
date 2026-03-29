@@ -1,10 +1,11 @@
 //! Background transcription worker that reads audio from ring buffers,
-//! accumulates segments, and feeds them to Whisper for transcription.
+//! accumulates segments, and feeds them to the selected STT engine.
 //!
 //! The worker runs on a dedicated thread, consuming samples from mic and
 //! system ring buffer consumers. When enough audio has accumulated (or
-//! silence is detected after speech), it runs Whisper inference and sends
-//! the resulting `TranscriptSegment` to the frontend via a Tauri `Channel`.
+//! silence is detected after speech), it runs inference via the configured
+//! [`SttBackend`](super::engine::SttBackend) and sends the resulting
+//! `TranscriptSegment` to the frontend via a Tauri `Channel`.
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
@@ -14,10 +15,11 @@ use std::time::Instant;
 use ringbuf::traits::Consumer as _;
 use ringbuf::HeapCons;
 use tauri::ipc::Channel;
-use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 use crate::audio::pipeline;
 use crate::audio::types::{Speaker, TranscriptSegment};
+
+use super::engine::{self, SttBackend, SttEngine};
 
 /// Number of 16 kHz samples for segment overlap (~300ms).
 /// Prepended to the next segment to prevent word truncation at boundaries.
@@ -28,7 +30,9 @@ const OVERLAP_SAMPLES: usize = 4_800;
 /// Bundles all the parameters needed to spawn the background transcription
 /// thread, keeping function signatures manageable.
 pub struct WorkerConfig {
-    /// Path to the ggml Whisper model file.
+    /// The STT engine to use for transcription.
+    pub engine: SttEngine,
+    /// Path to the model file (Whisper GGML) or directory (ONNX models).
     pub model_path: std::path::PathBuf,
     /// Ring buffer consumer for the microphone stream.
     pub mic_consumer: HeapCons<f32>,
@@ -46,7 +50,8 @@ pub struct WorkerConfig {
     pub vad_threshold: Arc<AtomicU32>,
     /// Auto-stop after this many seconds of silence.
     pub silence_timeout_seconds: Option<u32>,
-    /// Optional prompt to guide Whisper (domain terms, names).
+    /// Optional prompt to guide transcription (domain terms, names).
+    /// Supported by Whisper; other engines may ignore it.
     pub initial_prompt: Option<String>,
     /// Maximum segment duration before forced transcription.
     pub max_segment_seconds: u32,
@@ -161,6 +166,7 @@ fn worker_loop(
     config: WorkerConfig,
 ) -> Vec<TranscriptSegment> {
     let WorkerConfig {
+        engine,
         model_path,
         mut mic_consumer,
         mut system_consumer,
@@ -175,14 +181,11 @@ fn worker_loop(
         channel,
     } = config;
 
-    // Load the Whisper model once for the lifetime of the worker
-    let ctx = match WhisperContext::new_with_params(
-        model_path.to_str().unwrap_or_default(),
-        WhisperContextParameters::default(),
-    ) {
-        Ok(ctx) => ctx,
+    // Load the STT backend once for the lifetime of the worker
+    let mut backend = match engine::create_backend(engine, &model_path) {
+        Ok(b) => b,
         Err(e) => {
-            eprintln!("Failed to load Whisper model: {}", e);
+            eprintln!("Failed to load {} model: {}", engine, e);
             return Vec::new();
         }
     };
@@ -209,7 +212,7 @@ fn worker_loop(
     let mut system_raw_buf: Vec<f32> = Vec::new();
 
     // Overlap buffers: tail of the previous 16 kHz mono segment, prepended
-    // to the next segment so Whisper has context across boundaries and
+    // to the next segment so the engine has context across boundaries and
     // doesn't truncate words at the cut point.
     let mut mic_overlap: Vec<f32> = Vec::new();
     let mut system_overlap: Vec<f32> = Vec::new();
@@ -261,7 +264,7 @@ fn worker_loop(
                 // Prepend overlap from previous segment for word-boundary context
                 let audio = prepend_overlap(&mic_overlap, &mic_mono);
                 if let Some(seg) = transcribe_segment(
-                    &ctx,
+                    &mut *backend,
                     &audio,
                     Speaker::Me,
                     mic_segment_start_ms,
@@ -294,7 +297,7 @@ fn worker_loop(
             if system_had_speech {
                 let audio = prepend_overlap(&system_overlap, &system_mono);
                 if let Some(seg) = transcribe_segment(
-                    &ctx,
+                    &mut *backend,
                     &audio,
                     Speaker::Others,
                     system_segment_start_ms,
@@ -337,7 +340,7 @@ fn worker_loop(
     if !mic_mono.is_empty() && pipeline::is_speech(&mic_mono, threshold) {
         let audio = prepend_overlap(&mic_overlap, &mic_mono);
         if let Some(seg) = transcribe_segment(
-            &ctx,
+            &mut *backend,
             &audio,
             Speaker::Me,
             mic_segment_start_ms,
@@ -354,7 +357,7 @@ fn worker_loop(
     if !system_mono.is_empty() && pipeline::is_speech(&system_mono, threshold) {
         let audio = prepend_overlap(&system_overlap, &system_mono);
         if let Some(seg) = transcribe_segment(
-            &ctx,
+            &mut *backend,
             &audio,
             Speaker::Others,
             system_segment_start_ms,
@@ -381,7 +384,7 @@ const VAD_WINDOW: usize = 1_600;
 
 /// Minimum buffer length before we'll send a segment for transcription
 /// (~0.25 seconds at 16 kHz). Short words like "yes" can be under 0.3s,
-/// so we keep this low and let Whisper handle the decoding.
+/// so we keep this low and let the engine handle the decoding.
 const MIN_SEGMENT_SAMPLES: usize = 4_000;
 
 /// Number of consecutive silent polls required before cutting a segment.
@@ -448,7 +451,7 @@ fn should_transcribe(
     false
 }
 
-/// Check whether Whisper output is a non-speech artifact (silence markers,
+/// Check whether STT output is a non-speech artifact (silence markers,
 /// blank audio tags, music notes, etc.) that should be discarded.
 fn is_non_speech(text: &str) -> bool {
     let lower = text.trim().to_lowercase();
@@ -473,10 +476,10 @@ fn is_non_speech(text: &str) -> bool {
         || lower.chars().all(|c| c == '♪' || c == '♫' || c.is_whitespace())
 }
 
-/// Run Whisper inference on a 16 kHz mono audio segment, send the result
+/// Run STT inference on a 16 kHz mono audio segment, send the result
 /// to the frontend, and return a clone for accumulation.
 fn transcribe_segment(
-    ctx: &WhisperContext,
+    backend: &mut dyn SttBackend,
     audio: &[f32],
     speaker: Speaker,
     start_ms: u64,
@@ -484,44 +487,14 @@ fn transcribe_segment(
     initial_prompt: Option<&str>,
     channel: &Channel<TranscriptSegment>,
 ) -> Option<TranscriptSegment> {
-    let mut state = match ctx.create_state() {
-        Ok(s) => s,
+    let text = match backend.transcribe(audio, initial_prompt) {
+        Ok(t) => t,
         Err(e) => {
-            eprintln!("Failed to create Whisper state: {}", e);
+            eprintln!("Transcription failed: {}", e);
             return None;
         }
     };
 
-    let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-    params.set_language(Some("en"));
-    params.set_print_special(false);
-    params.set_print_realtime(false);
-    params.set_print_progress(false);
-
-    if let Some(prompt) = initial_prompt {
-        params.set_initial_prompt(prompt);
-    }
-
-    if let Err(e) = state.full(params, audio) {
-        eprintln!("Whisper inference failed: {}", e);
-        return None;
-    }
-
-    let num_segments = state.full_n_segments();
-    let mut text_parts: Vec<String> = Vec::new();
-
-    for i in 0..num_segments {
-        if let Some(seg) = state.get_segment(i) {
-            if let Ok(segment_text) = seg.to_str_lossy() {
-                let trimmed = segment_text.trim().to_string();
-                if !trimmed.is_empty() {
-                    text_parts.push(trimmed);
-                }
-            }
-        }
-    }
-
-    let text = text_parts.join(" ");
     if text.is_empty() || is_non_speech(&text) {
         return None;
     }

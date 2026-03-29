@@ -10,6 +10,9 @@ import {
   setSilenceTimeout,
   getSettings,
   setWhisperModel,
+  setSttEngine,
+  setSttModel,
+  getEngineModels,
   setInitialPrompt,
   setMaxSegmentSeconds,
   setLlmProvider,
@@ -23,7 +26,7 @@ import { useRecording } from '../../hooks/useRecording';
 import { Button, ButtonVariant } from '../../components/Button';
 import { Panel } from '../../components/Panel';
 import { Select } from '../../components/Select';
-import type { ModelInfo } from '../../types';
+import type { ModelEntry, ModelInfo } from '../../types';
 import s from './SettingsPage.module.scss';
 
 /** Payload emitted by the Rust backend during model downloads. */
@@ -56,7 +59,12 @@ export function SettingsPage() {
   const [outputDirSaved, setOutputDirSaved] = useState(false);
   const [silenceTimeout, setSilenceTimeoutState] = useState<number>(300);
   const [timeoutSaved, setTimeoutSaved] = useState(false);
+  const [sttEngine, setSttEngineState] = useState('whisper');
   const [whisperModel, setWhisperModelState] = useState('base');
+  const [sttModel, setSttModelState] = useState<string | null>(null);
+  const [engineModelOptions, setEngineModelOptions] = useState<ModelEntry[]>(
+    [],
+  );
   const [initialPrompt, setInitialPromptState] = useState('');
   const [promptSaved, setPromptSaved] = useState(false);
   const [maxSegmentSeconds, setMaxSegmentSecondsState] = useState(15);
@@ -91,8 +99,12 @@ export function SettingsPage() {
         setCustomPath(info.models_dir);
         setOutputDirState(dir);
         setSilenceTimeoutState(settings.silence_timeout_seconds ?? 0);
+        setSttEngineState(settings.stt_engine);
         setWhisperModelState(settings.whisper_model);
+        setSttModelState(settings.stt_model);
         setInitialPromptState(settings.initial_prompt ?? '');
+        const models = await getEngineModels(settings.stt_engine);
+        setEngineModelOptions(models);
         setMaxSegmentSecondsState(settings.max_segment_seconds);
         setLlmProviderValue(settings.llm_provider);
         setLlmModelValue(settings.llm_model ?? '');
@@ -225,19 +237,41 @@ export function SettingsPage() {
     }
   }, [silenceTimeout]);
 
-  /** Change the Whisper model and reload model info. */
-  const handleModelChange = useCallback(
-    async (model: string) => {
-      setWhisperModelState(model);
+  /** Change the STT engine and update the model list. */
+  const handleEngineChange = useCallback(
+    async (engine: string) => {
+      setSttEngineState(engine);
       try {
-        await setWhisperModel(model);
+        await setSttEngine(engine);
+        const models = await getEngineModels(engine);
+        setEngineModelOptions(models);
         await loadModelInfo();
         await refreshModelStatus();
       } catch (err) {
-        console.error('Failed to set whisper model:', err);
+        console.error('Failed to set STT engine:', err);
       }
     },
     [loadModelInfo, refreshModelStatus],
+  );
+
+  /** Change the model for the active engine and reload model info. */
+  const handleModelChange = useCallback(
+    async (model: string) => {
+      if (sttEngine === 'whisper') {
+        setWhisperModelState(model);
+        await setWhisperModel(model);
+      } else {
+        setSttModelState(model);
+        await setSttModel(model);
+      }
+      try {
+        await loadModelInfo();
+        await refreshModelStatus();
+      } catch (err) {
+        console.error('Failed to set model:', err);
+      }
+    },
+    [sttEngine, loadModelInfo, refreshModelStatus],
   );
 
   /** Save the initial prompt setting. */
@@ -359,27 +393,28 @@ export function SettingsPage() {
         <Panel title="Transcription Model">
           <div className={s.fieldGroup}>
             <Select
-              label="Model"
-              value={whisperModel}
+              label="Engine"
+              value={sttEngine}
               options={[
-                {
-                  value: 'tiny',
-                  label: 'Tiny (~75 MB — fastest, least accurate)',
-                },
-                {
-                  value: 'base',
-                  label: 'Base (~142 MB — fast, good accuracy)',
-                },
-                { value: 'small', label: 'Small (~466 MB — balanced)' },
-                {
-                  value: 'medium',
-                  label: 'Medium (~1.5 GB — slower, high accuracy)',
-                },
-                {
-                  value: 'large-v3-turbo',
-                  label: 'Large V3 Turbo (~1.6 GB — fast, very accurate)',
-                },
+                { value: 'whisper', label: 'Whisper (GGML)' },
+                { value: 'parakeet', label: 'Parakeet (ONNX)' },
+                { value: 'moonshine', label: 'Moonshine (ONNX)' },
+                { value: 'sensevoice', label: 'SenseVoice (ONNX)' },
               ]}
+              onChange={handleEngineChange}
+              disabled={isRecording}
+            />
+            <Select
+              label="Model"
+              value={
+                sttEngine === 'whisper'
+                  ? whisperModel
+                  : (sttModel ?? engineModelOptions[0]?.id ?? '')
+              }
+              options={engineModelOptions.map((m) => ({
+                value: m.id,
+                label: m.label,
+              }))}
               onChange={handleModelChange}
               disabled={isRecording}
             />

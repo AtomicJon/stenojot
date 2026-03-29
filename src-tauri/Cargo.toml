@@ -31,6 +31,7 @@ libpulse-simple-binding = "2.28"
 rubato = "0.15"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros"] }
 whisper-rs = "0.16"
+transcribe-rs = { version = "0.3", features = ["onnx"] }
 reqwest = { version = "0.12", features = ["blocking", "stream", "json"] }
 chrono = "0.4"
 dirs = "6"

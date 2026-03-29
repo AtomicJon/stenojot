@@ -28,8 +28,13 @@ pub struct Settings {
     pub output_dir: Option<String>,
     /// Auto-stop after this many seconds of silence (None = disabled).
     pub silence_timeout_seconds: Option<u32>,
+    /// STT engine identifier ("whisper", "parakeet", "moonshine", "sensevoice").
+    pub stt_engine: String,
     /// Whisper model name (e.g. "base", "small", "medium", "tiny").
     pub whisper_model: String,
+    /// Model identifier for the active STT engine (used by non-Whisper engines).
+    /// When `stt_engine` is "whisper", `whisper_model` is used instead.
+    pub stt_model: Option<String>,
     /// Initial prompt to guide Whisper transcription (domain terms, names, etc.).
     pub initial_prompt: Option<String>,
     /// Maximum segment duration in seconds before forced transcription (1–30).
@@ -45,6 +50,9 @@ pub struct Settings {
     /// Whether to auto-generate summaries after recording stops.
     pub auto_summary: bool,
 }
+
+/// Default STT engine.
+pub const DEFAULT_STT_ENGINE: &str = "whisper";
 
 /// Default Whisper model name.
 pub const DEFAULT_WHISPER_MODEL: &str = "base";
@@ -65,7 +73,9 @@ impl Default for Settings {
             models_dir: None,
             output_dir: None,
             silence_timeout_seconds: Some(300),
+            stt_engine: DEFAULT_STT_ENGINE.to_string(),
             whisper_model: DEFAULT_WHISPER_MODEL.to_string(),
+            stt_model: None,
             initial_prompt: None,
             max_segment_seconds: DEFAULT_MAX_SEGMENT_SECONDS,
             llm_provider: DEFAULT_LLM_PROVIDER.to_string(),
@@ -165,7 +175,9 @@ mod tests {
             models_dir: Some("/custom/models".to_string()),
             output_dir: Some("/custom/output".to_string()),
             silence_timeout_seconds: Some(120),
+            stt_engine: "parakeet".to_string(),
             whisper_model: "small".to_string(),
+            stt_model: Some("parakeet-tdt-0.6b".to_string()),
             initial_prompt: Some("Kubernetes, PostgreSQL".to_string()),
             max_segment_seconds: 20,
             llm_provider: "anthropic".to_string(),

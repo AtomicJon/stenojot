@@ -15,13 +15,22 @@ export interface AudioLevels {
   auto_stopped: boolean;
 }
 
-/** Detailed information about the Whisper transcription model. */
+/** Detailed information about a transcription model. */
 export interface ModelInfo {
   name: string;
   path: string;
   downloaded: boolean;
   size_bytes: number;
   models_dir: string;
+  engine: string;
+}
+
+/** A catalog entry for an available model. */
+export interface ModelEntry {
+  id: string;
+  label: string;
+  engine: string;
+  hf_repo: string | null;
 }
 
 /** Persisted application settings from the backend. */
@@ -33,7 +42,9 @@ export interface PersistedSettings {
   models_dir: string | null;
   output_dir: string | null;
   silence_timeout_seconds: number | null;
+  stt_engine: string;
   whisper_model: string;
+  stt_model: string | null;
   initial_prompt: string | null;
   max_segment_seconds: number;
   llm_provider: string;

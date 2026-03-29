@@ -46,8 +46,12 @@ pub struct AppState {
     pub output_dir: Option<String>,
     /// Auto-stop silence timeout in seconds (None = disabled).
     pub silence_timeout_seconds: Option<u32>,
+    /// STT engine identifier ("whisper", "parakeet", "moonshine", "sensevoice").
+    pub stt_engine: String,
     /// Whisper model name (e.g. "base", "small", "medium").
     pub whisper_model: String,
+    /// Model identifier for the active non-Whisper STT engine.
+    pub stt_model: Option<String>,
     /// Initial prompt to guide Whisper transcription.
     pub initial_prompt: Option<String>,
     /// Maximum segment duration in seconds before forced transcription.
@@ -102,7 +106,9 @@ impl AppState {
             config_dir: PathBuf::new(),
             output_dir: None,
             silence_timeout_seconds: Some(300),
+            stt_engine: settings::DEFAULT_STT_ENGINE.to_string(),
             whisper_model: settings::DEFAULT_WHISPER_MODEL.to_string(),
+            stt_model: None,
             initial_prompt: None,
             max_segment_seconds: settings::DEFAULT_MAX_SEGMENT_SECONDS,
             recording_start_time: None,
@@ -128,7 +134,9 @@ fn save_current_settings(app_state: &AppState) {
         models_dir: manager::get_custom_models_dir().map(|p| p.to_string_lossy().to_string()),
         output_dir: app_state.output_dir.clone(),
         silence_timeout_seconds: app_state.silence_timeout_seconds,
+        stt_engine: app_state.stt_engine.clone(),
         whisper_model: app_state.whisper_model.clone(),
+        stt_model: app_state.stt_model.clone(),
         initial_prompt: app_state.initial_prompt.clone(),
         max_segment_seconds: app_state.max_segment_seconds,
         llm_provider: app_state.llm_provider.clone(),
@@ -231,6 +239,33 @@ pub fn set_whisper_model(model: String, state: State<'_, Mutex<AppState>>) -> Re
     Ok(())
 }
 
+/// Set and persist the active STT engine.
+#[tauri::command]
+pub fn set_stt_engine(engine: String, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
+    let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    // Validate the engine name
+    let _ = crate::transcription::engine::parse_engine(&engine);
+    app_state.stt_engine = engine;
+    save_current_settings(&app_state);
+    Ok(())
+}
+
+/// Set and persist the model for the current non-Whisper STT engine.
+#[tauri::command]
+pub fn set_stt_model(model: String, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
+    let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    app_state.stt_model = if model.is_empty() { None } else { Some(model) };
+    save_current_settings(&app_state);
+    Ok(())
+}
+
+/// List available models for a given STT engine.
+#[tauri::command]
+pub fn get_engine_models(engine: String) -> Vec<manager::ModelEntry> {
+    let engine = crate::transcription::engine::parse_engine(&engine);
+    manager::get_engine_models(engine)
+}
+
 /// Set and persist the initial prompt for Whisper transcription.
 ///
 /// The prompt provides context (domain terms, names, jargon) to improve
@@ -290,15 +325,24 @@ pub fn start_recording(
         return Err(CaptureError::AlreadyRecording.to_string());
     }
 
-    // Ensure the Whisper model is available before starting
-    let model_name = &app_state.whisper_model;
-    if !manager::model_exists(model_name) {
+    // Determine which engine + model to use
+    let engine = crate::transcription::engine::parse_engine(&app_state.stt_engine);
+    let model_id = match engine {
+        crate::transcription::engine::SttEngine::Whisper => app_state.whisper_model.clone(),
+        _ => app_state
+            .stt_model
+            .clone()
+            .unwrap_or_else(|| manager::get_engine_models(engine)[0].id.clone()),
+    };
+
+    // Ensure the model is available before starting
+    if !manager::engine_model_exists(engine, &model_id) {
         return Err(format!(
-            "Whisper model '{}' not downloaded. Call download_model first.",
-            model_name
+            "{} model '{}' not downloaded. Download it from Settings first.",
+            engine, model_id
         ));
     }
-    let model_path = manager::get_model_path(model_name);
+    let model_path = manager::get_engine_model_path(engine, &model_id);
 
     // Start mic capture with current gain setting
     let mic_handle = capture::start_capture(&mic_device_id, Arc::clone(&app_state.mic_gain))
@@ -322,6 +366,7 @@ pub fn start_recording(
 
     // Spawn the transcription worker with ownership of the ring buffer consumers
     let worker = TranscriptionWorker::start(WorkerConfig {
+        engine,
         model_path,
         mic_consumer: mic_handle.consumer,
         system_consumer,
@@ -568,18 +613,36 @@ pub fn get_vad_threshold(state: State<'_, Mutex<AppState>>) -> Result<f32, Strin
     ))
 }
 
-/// Get detailed info about the Whisper model (path, size, download status).
+/// Get detailed info about the active model (path, size, download status).
+///
+/// Uses the current engine setting to determine which model to query.
 #[tauri::command]
 pub fn get_model_info(state: State<'_, Mutex<AppState>>) -> Result<ModelInfo, String> {
     let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
-    Ok(manager::get_model_info(&app_state.whisper_model))
+    let engine = crate::transcription::engine::parse_engine(&app_state.stt_engine);
+    let model_id = match engine {
+        crate::transcription::engine::SttEngine::Whisper => app_state.whisper_model.clone(),
+        _ => app_state
+            .stt_model
+            .clone()
+            .unwrap_or_else(|| manager::get_engine_models(engine)[0].id.clone()),
+    };
+    Ok(manager::get_engine_model_info(engine, &model_id))
 }
 
-/// Delete the downloaded Whisper model file.
+/// Delete the downloaded model file or directory.
 #[tauri::command]
 pub fn delete_model(state: State<'_, Mutex<AppState>>) -> Result<(), String> {
     let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
-    manager::delete_model(&app_state.whisper_model)
+    let engine = crate::transcription::engine::parse_engine(&app_state.stt_engine);
+    let model_id = match engine {
+        crate::transcription::engine::SttEngine::Whisper => app_state.whisper_model.clone(),
+        _ => app_state
+            .stt_model
+            .clone()
+            .unwrap_or_else(|| manager::get_engine_models(engine)[0].id.clone()),
+    };
+    manager::delete_engine_model(engine, &model_id)
 }
 
 /// Set a custom directory for storing Whisper model files.
@@ -598,7 +661,7 @@ pub fn set_models_dir(path: String, state: State<'_, Mutex<AppState>>) -> Result
     Ok(())
 }
 
-/// Download the currently selected Whisper model from Hugging Face.
+/// Download the currently selected model from Hugging Face.
 ///
 /// Spawns the download on a background thread and returns immediately.
 /// Emits `download-progress` events during the download, then either
@@ -610,12 +673,25 @@ pub fn download_model(
     state: State<'_, Mutex<AppState>>,
 ) -> Result<(), String> {
     let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
-    let model_name = app_state.whisper_model.clone();
+    let engine = crate::transcription::engine::parse_engine(&app_state.stt_engine);
+    let model_id = match engine {
+        crate::transcription::engine::SttEngine::Whisper => app_state.whisper_model.clone(),
+        _ => app_state
+            .stt_model
+            .clone()
+            .unwrap_or_else(|| manager::get_engine_models(engine)[0].id.clone()),
+    };
     drop(app_state); // Release lock before spawning
 
     let app_handle = app.clone();
-    std::thread::spawn(
-        move || match manager::download_model_file(&model_name, &app_handle) {
+    std::thread::spawn(move || {
+        let result = match engine {
+            crate::transcription::engine::SttEngine::Whisper => {
+                manager::download_model_file(&model_id, &app_handle)
+            }
+            _ => manager::download_onnx_model(engine, &model_id, &app_handle),
+        };
+        match result {
             Ok(path) => {
                 let _ = app_handle.emit("download-complete", path.to_string_lossy().to_string());
             }
@@ -623,8 +699,8 @@ pub fn download_model(
                 eprintln!("Model download failed: {}", e);
                 let _ = app_handle.emit("download-error", e);
             }
-        },
-    );
+        }
+    });
 
     Ok(())
 }

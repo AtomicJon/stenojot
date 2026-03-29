@@ -35,6 +35,9 @@ vi.mock('../../lib/commands', () => ({
   setSilenceTimeout: vi.fn(),
   getSettings: vi.fn(),
   setWhisperModel: vi.fn(),
+  setSttEngine: vi.fn(),
+  setSttModel: vi.fn(),
+  getEngineModels: vi.fn(),
   setInitialPrompt: vi.fn(),
   setMaxSegmentSeconds: vi.fn(),
   setLlmProvider: vi.fn(),
@@ -61,12 +64,14 @@ import {
   downloadModel,
   getSettings,
   getOutputDir,
+  getEngineModels,
 } from '../../lib/commands';
 
 const mockGetModelInfo = vi.mocked(getModelInfo);
 const mockDownloadModel = vi.mocked(downloadModel);
 const mockGetSettings = vi.mocked(getSettings);
 const mockGetOutputDir = vi.mocked(getOutputDir);
+const mockGetEngineModels = vi.mocked(getEngineModels);
 
 /* ── Fixtures ────────────────────────────────────────────────────── */
 
@@ -76,6 +81,7 @@ const notDownloadedModel: ModelInfo = {
   downloaded: false,
   size_bytes: 0,
   models_dir: '/models',
+  engine: 'whisper',
 };
 
 const downloadedModel: ModelInfo = {
@@ -84,6 +90,7 @@ const downloadedModel: ModelInfo = {
   downloaded: true,
   size_bytes: 147_951_465,
   models_dir: '/models',
+  engine: 'whisper',
 };
 
 const defaultSettings: PersistedSettings = {
@@ -93,7 +100,9 @@ const defaultSettings: PersistedSettings = {
   vad_threshold: 0.01,
   models_dir: null,
   output_dir: null,
+  stt_engine: 'whisper',
   whisper_model: 'base',
+  stt_model: null,
   silence_timeout_seconds: 300,
   initial_prompt: '',
   max_segment_seconds: 15,
@@ -122,6 +131,9 @@ describe('SettingsPage', () => {
     capturedListeners = new Map();
     mockGetSettings.mockResolvedValue(defaultSettings);
     mockGetOutputDir.mockResolvedValue('/output');
+    mockGetEngineModels.mockResolvedValue([
+      { id: 'base', label: 'Base (~142 MB)', engine: 'whisper', hf_repo: null },
+    ]);
   });
 
   it('shows Download Model button when model is not downloaded', async () => {
