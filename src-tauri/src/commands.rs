@@ -411,7 +411,7 @@ pub fn start_recording(
 }
 
 /// Result returned by `stop_recording`.
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, Clone)]
 pub struct StopRecordingResult {
     /// Path to the saved transcript file, if any segments were recorded.
     pub transcript_path: Option<String>,
@@ -421,44 +421,32 @@ pub struct StopRecordingResult {
 
 /// Stop the current recording session.
 ///
-/// Drops audio streams, stops the transcription worker, writes the final
-/// transcript to the file created at start, and resets state.
+/// Immediately stops audio streams and resets recording state, then spawns
+/// a background thread to join the transcription worker, write the final
+/// transcript, and optionally generate a summary. Emits a
+/// `recording-stopped` event with the [`StopRecordingResult`] when the
+/// background work completes.
 #[tauri::command]
 pub fn stop_recording(
     state: State<'_, Mutex<AppState>>,
     app: tauri::AppHandle,
-) -> Result<StopRecordingResult, String> {
+) -> Result<(), String> {
     let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
 
     if !app_state.is_recording {
         return Err(CaptureError::NotRecording.to_string());
     }
 
-    // Stop audio capture
+    // Stop audio capture streams (fast — just drops handles)
     app_state.mic_stream = None;
-    if let Some(ref mut sys) = app_state.system_capture {
-        sys.stop();
-    }
-    app_state.system_capture = None;
+    let mut system_capture = app_state.system_capture.take();
     app_state.mic_device_id = None;
     app_state.system_device_id = None;
     app_state.is_recording = false;
     app_state.is_paused = false;
 
-    // Stop the transcription worker and collect accumulated segments
-    let segments = if let Some(ref mut worker) = app_state.worker {
-        worker.stop()
-    } else {
-        Vec::new()
-    };
-    app_state.worker = None;
-
-    // Reset RMS levels
-    app_state.mic_rms.store(0u32, Ordering::Relaxed);
-    app_state.system_rms.store(0u32, Ordering::Relaxed);
-
-    // Write final transcript to the file created at start
-    let segment_count = segments.len();
+    // Take ownership of worker and recording metadata for background processing
+    let mut worker = app_state.worker.take();
     let transcript_path = app_state.current_transcript_path.take();
     let meeting_name = app_state.current_meeting_name.take();
     let start_time = app_state
@@ -466,39 +454,77 @@ pub fn stop_recording(
         .take()
         .unwrap_or_else(chrono::Local::now);
 
-    let end_time = chrono::Local::now();
-    let name_str = meeting_name.as_deref().unwrap_or("Meeting").to_string();
+    // Reset RMS levels
+    app_state.mic_rms.store(0u32, Ordering::Relaxed);
+    app_state.system_rms.store(0u32, Ordering::Relaxed);
 
-    let path_str = if let Some(ref path) = transcript_path {
-        if let Err(e) =
-            markdown::update_transcript(path, &segments, &name_str, start_time, end_time)
-        {
-            eprintln!("Failed to write final transcript: {}", e);
-        }
-        Some(path.to_string_lossy().to_string())
+    // Gather summary config while we still hold the lock
+    let auto_summary = app_state.auto_summary;
+    let llm_config = if auto_summary {
+        Some(LlmConfig {
+            provider: parse_provider(&app_state.llm_provider),
+            model: app_state.llm_model.clone().unwrap_or_default(),
+            api_key: app_state.llm_api_key.clone(),
+            base_url: app_state.llm_base_url.clone(),
+        })
     } else {
         None
     };
+    let config_dir = app_state.config_dir.clone();
 
-    // Notify frontend that meetings list changed
-    let _ = app.emit("meetings-changed", ());
+    // Release the lock before spawning the background thread
+    drop(app_state);
 
-    // Spawn background summary generation if enabled
-    if app_state.auto_summary {
-        if let Some(ref tx_path_str) = path_str {
-            let config = LlmConfig {
-                provider: parse_provider(&app_state.llm_provider),
-                model: app_state.llm_model.clone().unwrap_or_default(),
-                api_key: app_state.llm_api_key.clone(),
-                base_url: app_state.llm_base_url.clone(),
-            };
-            let tx_path = PathBuf::from(tx_path_str);
-            let loaded = settings::load(&app_state.config_dir);
-            let out_dir = loaded.output_dir_resolved();
-            let name = name_str.clone();
-            let app_handle = app.clone();
+    let app_handle = app.clone();
+    std::thread::spawn(move || {
+        // Stop system capture thread (may block briefly)
+        if let Some(ref mut sys) = system_capture {
+            sys.stop();
+        }
+        drop(system_capture);
 
-            std::thread::spawn(move || {
+        // Join the transcription worker and collect final segments (blocking)
+        let segments = if let Some(ref mut w) = worker {
+            w.stop()
+        } else {
+            Vec::new()
+        };
+        drop(worker);
+
+        let end_time = chrono::Local::now();
+        let name_str = meeting_name.as_deref().unwrap_or("Meeting").to_string();
+        let segment_count = segments.len();
+
+        // Write final transcript
+        let path_str = if let Some(ref path) = transcript_path {
+            if let Err(e) =
+                markdown::update_transcript(path, &segments, &name_str, start_time, end_time)
+            {
+                eprintln!("Failed to write final transcript: {}", e);
+            }
+            Some(path.to_string_lossy().to_string())
+        } else {
+            None
+        };
+
+        // Notify frontend that recording stop is complete
+        let _ = app_handle.emit(
+            "recording-stopped",
+            StopRecordingResult {
+                transcript_path: path_str.clone(),
+                segment_count,
+            },
+        );
+        let _ = app_handle.emit("meetings-changed", ());
+
+        // Generate summary if enabled
+        if let Some(config) = llm_config {
+            if let Some(ref tx_path_str) = path_str {
+                let tx_path = PathBuf::from(tx_path_str);
+                let loaded = settings::load(&config_dir);
+                let out_dir = loaded.output_dir_resolved();
+                let name = name_str.clone();
+
                 let _ = app_handle.emit("summary-generating", ());
                 match llm::summary::generate_summary(
                     &config, &tx_path, &out_dir, start_time, end_time, &name,
@@ -522,14 +548,11 @@ pub fn stop_recording(
                         let _ = app_handle.emit("summary-error", e.to_string());
                     }
                 }
-            });
+            }
         }
-    }
+    });
 
-    Ok(StopRecordingResult {
-        transcript_path: path_str,
-        segment_count,
-    })
+    Ok(())
 }
 
 /// Event payload emitted when summary generation completes.

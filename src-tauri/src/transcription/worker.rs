@@ -332,12 +332,19 @@ fn worker_loop(
         thread::sleep(std::time::Duration::from_millis(POLL_INTERVAL_MS));
     }
 
-    // Flush any remaining audio in both buffers
+    // Final drain: capture any samples pushed since the last loop iteration
+    drain_consumer(&mut mic_consumer, &mut mic_raw_buf);
+    drain_consumer(&mut system_consumer, &mut system_raw_buf);
+
+    // Flush any remaining audio in both buffers.
+    // Use the had_speech flags from the main loop — they already track whether
+    // speech was detected in the current accumulation window. Recomputing VAD
+    // over the entire buffer would dilute speech with trailing silence, causing
+    // the final segment to be dropped.
     let elapsed_ms = recording_start.elapsed().as_millis() as u64;
-    let threshold = f32::from_bits(vad_threshold.load(Ordering::Relaxed));
 
     let mic_mono = pipeline::process_buffer(&mic_raw_buf, mic_sample_rate, mic_channels);
-    if !mic_mono.is_empty() && pipeline::is_speech(&mic_mono, threshold) {
+    if !mic_mono.is_empty() && mic_mono.len() >= MIN_SEGMENT_SAMPLES && mic_had_speech {
         let audio = prepend_overlap(&mic_overlap, &mic_mono);
         if let Some(seg) = transcribe_segment(
             &mut *backend,
@@ -354,7 +361,7 @@ fn worker_loop(
 
     let system_mono =
         pipeline::process_buffer(&system_raw_buf, system_sample_rate, system_channels);
-    if !system_mono.is_empty() && pipeline::is_speech(&system_mono, threshold) {
+    if !system_mono.is_empty() && system_mono.len() >= MIN_SEGMENT_SAMPLES && system_had_speech {
         let audio = prepend_overlap(&system_overlap, &system_mono);
         if let Some(seg) = transcribe_segment(
             &mut *backend,

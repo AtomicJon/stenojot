@@ -7,7 +7,6 @@ import type {
   ModelInfo,
   PersistedSettings,
   StartRecordingResult,
-  StopRecordingResult,
   TranscriptSegment,
 } from '../types';
 
@@ -57,9 +56,9 @@ export function saveCurrentTranscript(): Promise<number> {
   return invoke<number>('save_current_transcript');
 }
 
-/** Stop the current recording and return transcript info. */
-export function stopRecording(): Promise<StopRecordingResult> {
-  return invoke<StopRecordingResult>('stop_recording');
+/** Stop the current recording. The result is emitted asynchronously via a `recording-stopped` event. */
+export function stopRecording(): Promise<void> {
+  return invoke<void>('stop_recording');
 }
 
 /** Get current audio RMS levels for both streams. */

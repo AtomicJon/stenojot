@@ -20,7 +20,12 @@ import {
   refreshTray,
 } from '../lib/commands';
 import { listen } from '@tauri-apps/api/event';
-import type { AudioDevice, AudioLevels, TranscriptSegment } from '../types';
+import type {
+  AudioDevice,
+  AudioLevels,
+  StopRecordingResult,
+  TranscriptSegment,
+} from '../types';
 import { RecordingContext } from './useRecording';
 import type { RecordingState, SummaryStatus } from './useRecording';
 
@@ -137,6 +142,19 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
     };
   }, []);
 
+  // Listen for recording-stopped event (background finalization complete)
+  useEffect(() => {
+    const unlisten = listen<StopRecordingResult>(
+      'recording-stopped',
+      (event) => {
+        setLastTranscriptPath(event.payload.transcript_path);
+      },
+    );
+    return () => {
+      unlisten.then((u) => u());
+    };
+  }, []);
+
   // Listen for summary generation events
   useEffect(() => {
     const unlistenGenerating = listen('summary-generating', () => {
@@ -218,43 +236,42 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
   }, [micDeviceId, systemDeviceId]);
 
   const handleStop = useCallback(async (): Promise<string | null> => {
-    let transcriptPath: string | null = null;
     try {
-      const result = await stopRecording();
-      transcriptPath = result.transcript_path;
-      setLastTranscriptPath(transcriptPath);
+      await stopRecording();
     } catch (err) {
       console.error('Failed to stop recording:', err);
-    } finally {
-      setIsRecording(false);
-      setIsPaused(false);
-      isPausedRef.current = false;
-      setCurrentTranscriptPath(null);
-      refreshTray().catch(() => {});
-      setAudioLevels({
-        mic_rms: 0,
-        system_rms: 0,
-        is_paused: false,
-        auto_stopped: false,
-      });
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-      if (levelPollRef.current) {
-        clearInterval(levelPollRef.current);
-        levelPollRef.current = null;
-      }
-      if (autoSaveRef.current) {
-        clearInterval(autoSaveRef.current);
-        autoSaveRef.current = null;
-      }
     }
-    return transcriptPath;
+    // Reset UI immediately — transcript path arrives via recording-stopped event
+    setIsRecording(false);
+    setIsPaused(false);
+    isPausedRef.current = false;
+    setCurrentTranscriptPath(null);
+    refreshTray().catch(() => {});
+    setAudioLevels({
+      mic_rms: 0,
+      system_rms: 0,
+      is_paused: false,
+      auto_stopped: false,
+    });
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    if (levelPollRef.current) {
+      clearInterval(levelPollRef.current);
+      levelPollRef.current = null;
+    }
+    if (autoSaveRef.current) {
+      clearInterval(autoSaveRef.current);
+      autoSaveRef.current = null;
+    }
+    return null;
   }, []);
 
   // Keep ref in sync so the level poll can trigger auto-stop
-  handleStopRef.current = handleStop;
+  useEffect(() => {
+    handleStopRef.current = handleStop;
+  }, [handleStop]);
 
   const handlePause = useCallback(async () => {
     try {
