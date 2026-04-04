@@ -18,7 +18,7 @@ jobs:
   # Wait for the CI workflow to pass on this commit before building release
   # artifacts. Prevents publishing a known-broken tag.
   ci-gate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Wait for CI to succeed
         env:
@@ -55,7 +55,7 @@ jobs:
       # platform-specific system audio capture is implemented.
       matrix:
         include:
-          - platform: ubuntu-22.04
+          - platform: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
             os_name: linux
             arch_name: x86_64
