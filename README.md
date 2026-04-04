@@ -36,17 +36,17 @@ yarn test:tauri          # Rust backend tests only (cargo test)
 ## Linting & Formatting
 
 ```bash
-yarn lint                # ESLint + TypeScript type-check (frontend)
+yarn lint                # Both of the above
 yarn lint:tauri          # Clippy with -D warnings (Rust)
-yarn lint:all            # Both of the above
+yarn lint:ui             # ESLint + TypeScript type-check (frontend)
 
-yarn format              # Prettier auto-fix (frontend)
+yarn format              # Auto-fix both frontend + Rust
+yarn format:ui           # Prettier auto-fix (frontend)
 yarn format:tauri        # cargo fmt (Rust)
-yarn format:all          # Auto-fix both frontend + Rust
 
-yarn format:check        # Prettier check only (frontend)
+yarn format:check        # Check both frontend + Rust
+yarn format:ui:check     # Prettier check only (frontend)
 yarn format:tauri:check  # cargo fmt --check (Rust)
-yarn format:all:check    # Check both frontend + Rust
 ```
 
 ## Full CI Check
@@ -56,7 +56,3 @@ Run everything CI runs, locally:
 ```bash
 yarn ci                  # format:all:check + lint:all + test
 ```
-
-## Recommended IDE Setup
-
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)

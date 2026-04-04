@@ -84,6 +84,29 @@ unsafe impl Send for AppState {}
 unsafe impl Sync for AppState {}
 
 impl AppState {
+    /// Resolve the active engine and model ID.
+    ///
+    /// Derives the engine from the model entry when possible so that the
+    /// engine and model are always consistent, even if the UI updates
+    /// `stt_engine` and `stt_model` independently.
+    pub fn resolve_engine_and_model(
+        &self,
+    ) -> (crate::transcription::engine::SttEngine, String) {
+        let engine = crate::transcription::engine::parse_engine(&self.stt_engine);
+        let model_id = match engine {
+            crate::transcription::engine::SttEngine::Whisper => self.whisper_model.clone(),
+            _ => self
+                .stt_model
+                .clone()
+                .unwrap_or_else(|| manager::get_engine_models(engine)[0].id.clone()),
+        };
+        // Re-derive the engine from the model entry to handle mismatches.
+        let engine = manager::find_model_entry(&model_id)
+            .map(|e| e.engine)
+            .unwrap_or(engine);
+        (engine, model_id)
+    }
+
     /// Create a new default application state.
     pub fn new() -> Self {
         Self {
@@ -326,14 +349,7 @@ pub fn start_recording(
     }
 
     // Determine which engine + model to use
-    let engine = crate::transcription::engine::parse_engine(&app_state.stt_engine);
-    let model_id = match engine {
-        crate::transcription::engine::SttEngine::Whisper => app_state.whisper_model.clone(),
-        _ => app_state
-            .stt_model
-            .clone()
-            .unwrap_or_else(|| manager::get_engine_models(engine)[0].id.clone()),
-    };
+    let (engine, model_id) = app_state.resolve_engine_and_model();
 
     // Ensure the model is available before starting
     if !manager::engine_model_exists(engine, &model_id) {
@@ -642,14 +658,7 @@ pub fn get_vad_threshold(state: State<'_, Mutex<AppState>>) -> Result<f32, Strin
 #[tauri::command]
 pub fn get_model_info(state: State<'_, Mutex<AppState>>) -> Result<ModelInfo, String> {
     let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
-    let engine = crate::transcription::engine::parse_engine(&app_state.stt_engine);
-    let model_id = match engine {
-        crate::transcription::engine::SttEngine::Whisper => app_state.whisper_model.clone(),
-        _ => app_state
-            .stt_model
-            .clone()
-            .unwrap_or_else(|| manager::get_engine_models(engine)[0].id.clone()),
-    };
+    let (engine, model_id) = app_state.resolve_engine_and_model();
     Ok(manager::get_engine_model_info(engine, &model_id))
 }
 
@@ -657,14 +666,7 @@ pub fn get_model_info(state: State<'_, Mutex<AppState>>) -> Result<ModelInfo, St
 #[tauri::command]
 pub fn delete_model(state: State<'_, Mutex<AppState>>) -> Result<(), String> {
     let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
-    let engine = crate::transcription::engine::parse_engine(&app_state.stt_engine);
-    let model_id = match engine {
-        crate::transcription::engine::SttEngine::Whisper => app_state.whisper_model.clone(),
-        _ => app_state
-            .stt_model
-            .clone()
-            .unwrap_or_else(|| manager::get_engine_models(engine)[0].id.clone()),
-    };
+    let (engine, model_id) = app_state.resolve_engine_and_model();
     manager::delete_engine_model(engine, &model_id)
 }
 
@@ -696,14 +698,7 @@ pub fn download_model(
     state: State<'_, Mutex<AppState>>,
 ) -> Result<(), String> {
     let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
-    let engine = crate::transcription::engine::parse_engine(&app_state.stt_engine);
-    let model_id = match engine {
-        crate::transcription::engine::SttEngine::Whisper => app_state.whisper_model.clone(),
-        _ => app_state
-            .stt_model
-            .clone()
-            .unwrap_or_else(|| manager::get_engine_models(engine)[0].id.clone()),
-    };
+    let (engine, model_id) = app_state.resolve_engine_and_model();
     drop(app_state); // Release lock before spawning
 
     let app_handle = app.clone();

@@ -108,29 +108,31 @@ pub fn get_engine_models(engine: SttEngine) -> Vec<ModelEntry> {
         ],
         SttEngine::Parakeet => vec![ModelEntry {
             id: "parakeet-tdt-0.6b".to_string(),
-            label: "Parakeet TDT 0.6B (~600 MB — fastest, excellent accuracy)".to_string(),
+            label: "Parakeet TDT 0.6B (~670 MB — fastest, excellent accuracy)".to_string(),
             engine: SttEngine::Parakeet,
-            hf_repo: Some("nvidia/parakeet-tdt-0.6b-v2".to_string()),
+            hf_repo: Some("istupakov/parakeet-tdt-0.6b-v3-onnx".to_string()),
         }],
         SttEngine::Moonshine => vec![
             ModelEntry {
                 id: "moonshine-tiny".to_string(),
                 label: "Moonshine Tiny (~36 MB — ultra-light, edge-optimized)".to_string(),
                 engine: SttEngine::Moonshine,
-                hf_repo: Some("UsefulSensors/moonshine-tiny".to_string()),
+                hf_repo: Some("onnx-community/moonshine-tiny-ONNX".to_string()),
             },
             ModelEntry {
                 id: "moonshine-base".to_string(),
                 label: "Moonshine Base (~90 MB — light, good accuracy)".to_string(),
                 engine: SttEngine::Moonshine,
-                hf_repo: Some("UsefulSensors/moonshine-base".to_string()),
+                hf_repo: Some("onnx-community/moonshine-base-ONNX".to_string()),
             },
         ],
         SttEngine::SenseVoice => vec![ModelEntry {
             id: "sensevoice-small".to_string(),
-            label: "SenseVoice Small (~500 MB — multi-language, emotion detection)".to_string(),
+            label: "SenseVoice Small (~240 MB — multi-language, emotion detection)".to_string(),
             engine: SttEngine::SenseVoice,
-            hf_repo: Some("FunAudioLLM/SenseVoiceSmall".to_string()),
+            hf_repo: Some(
+                "csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17".to_string(),
+            ),
         }],
     }
 }
@@ -406,11 +408,41 @@ pub fn download_model_file(model_name: &str, app: &tauri::AppHandle) -> Result<P
     Ok(path)
 }
 
-/// Downloads an ONNX model using `transcribe-rs`.
+/// Returns the list of HuggingFace file paths to download for a given
+/// ONNX model. Each entry is `(hf_file_path, local_filename)`.
+fn onnx_model_files(engine: SttEngine) -> Vec<(&'static str, &'static str)> {
+    match engine {
+        SttEngine::Moonshine => vec![
+            ("onnx/encoder_model.onnx", "encoder_model.onnx"),
+            (
+                "onnx/decoder_model_merged.onnx",
+                "decoder_model_merged.onnx",
+            ),
+            ("tokenizer.json", "tokenizer.json"),
+        ],
+        SttEngine::Parakeet => vec![
+            ("encoder-model.int8.onnx", "encoder-model.int8.onnx"),
+            (
+                "decoder_joint-model.int8.onnx",
+                "decoder_joint-model.int8.onnx",
+            ),
+            ("nemo128.onnx", "nemo128.onnx"),
+            ("vocab.txt", "vocab.txt"),
+        ],
+        SttEngine::SenseVoice => vec![
+            ("model.int8.onnx", "model.int8.onnx"),
+            ("tokens.txt", "tokens.txt"),
+        ],
+        SttEngine::Whisper => vec![],
+    }
+}
+
+/// Downloads an ONNX model from HuggingFace.
 ///
-/// The model is downloaded from HuggingFace into the ONNX models
-/// subdirectory. Progress events are emitted as "downloading" (start)
-/// and the final result.
+/// Each model's required ONNX files are downloaded individually from the
+/// HuggingFace repository into the local ONNX models subdirectory.
+/// Progress events are emitted via `download-progress` so the frontend
+/// can display a progress bar.
 pub fn download_onnx_model(
     engine: SttEngine,
     model_id: &str,
@@ -428,8 +460,20 @@ pub fn download_onnx_model(
         .hf_repo
         .ok_or_else(|| format!("Model {} has no HuggingFace repo configured", model_id))?;
 
-    // Emit indeterminate progress (ONNX downloads are managed by transcribe-rs,
-    // so we can't easily report granular progress)
+    if engine == SttEngine::Whisper {
+        return Err("Use download_model_file for Whisper models".to_string());
+    }
+
+    let files = onnx_model_files(engine);
+    if files.is_empty() {
+        return Err(format!("No ONNX files configured for model {}", model_id));
+    }
+
+    fs::create_dir_all(&model_dir)
+        .map_err(|e| format!("Failed to create ONNX model directory: {}", e))?;
+
+    eprintln!("Downloading ONNX model {} from {} ...", model_id, hf_repo);
+
     let _ = app.emit(
         "download-progress",
         DownloadProgress {
@@ -438,53 +482,71 @@ pub fn download_onnx_model(
         },
     );
 
-    eprintln!("Downloading ONNX model {} from {} ...", model_id, hf_repo);
+    let mut total_downloaded: u64 = 0;
 
-    // Use transcribe-rs model loading which handles downloading from HuggingFace.
-    // Each model type's `load` will download if not present locally.
-    // We set the ONNX model cache directory so models land in our models dir.
-    fs::create_dir_all(&model_dir)
-        .map_err(|e| format!("Failed to create ONNX model directory: {}", e))?;
+    for (hf_path, local_name) in &files {
+        let url = format!(
+            "https://huggingface.co/{}/resolve/main/{}",
+            hf_repo, hf_path
+        );
+        let dest = model_dir.join(local_name);
 
-    // For ONNX models, we delegate to transcribe-rs which handles
-    // downloading from HuggingFace via the ort crate's model loading.
-    // The model_dir is where the files will be stored.
-    let quantization = transcribe_rs::onnx::Quantization::default();
+        eprintln!("  Downloading {} ...", local_name);
 
-    match engine {
-        SttEngine::Parakeet => {
-            transcribe_rs::onnx::parakeet::ParakeetModel::load(&model_dir, &quantization)
-                .map_err(|e| format!("Failed to download Parakeet model: {}", e))?;
+        let response = reqwest::blocking::get(&url)
+            .map_err(|e| format!("Download request failed for {}: {}", local_name, e))?;
+
+        if !response.status().is_success() {
+            // Clean up partial directory on failure
+            let _ = fs::remove_dir_all(&model_dir);
+            return Err(format!(
+                "Download failed for {} with HTTP status {}",
+                local_name,
+                response.status()
+            ));
         }
-        SttEngine::Moonshine => {
-            let variant = if model_id.contains("base") {
-                transcribe_rs::onnx::moonshine::MoonshineVariant::Base
-            } else {
-                transcribe_rs::onnx::moonshine::MoonshineVariant::Tiny
-            };
-            transcribe_rs::onnx::moonshine::MoonshineModel::load(
-                &model_dir,
-                variant,
-                &quantization,
-            )
-            .map_err(|e| format!("Failed to download Moonshine model: {}", e))?;
+
+        let total_bytes = response.content_length().unwrap_or(0);
+        let mut file_downloaded: u64 = 0;
+        let mut last_emitted = std::time::Instant::now();
+
+        let mut file = fs::File::create(&dest)
+            .map_err(|e| format!("Failed to create file {}: {}", local_name, e))?;
+
+        let mut reader = std::io::BufReader::new(response);
+        let mut buf = [0u8; 128 * 1024];
+        loop {
+            let n = std::io::Read::read(&mut reader, &mut buf)
+                .map_err(|e| format!("Failed to read response for {}: {}", local_name, e))?;
+            if n == 0 {
+                break;
+            }
+            file.write_all(&buf[..n])
+                .map_err(|e| format!("Failed to write file {}: {}", local_name, e))?;
+            file_downloaded += n as u64;
+
+            let now = std::time::Instant::now();
+            if now.duration_since(last_emitted).as_millis() >= 100 {
+                last_emitted = now;
+                let _ = app.emit(
+                    "download-progress",
+                    DownloadProgress {
+                        bytes_downloaded: total_downloaded + file_downloaded,
+                        total_bytes: total_downloaded + total_bytes,
+                    },
+                );
+            }
         }
-        SttEngine::SenseVoice => {
-            transcribe_rs::onnx::sense_voice::SenseVoiceModel::load(&model_dir, &quantization)
-                .map_err(|e| format!("Failed to download SenseVoice model: {}", e))?;
-        }
-        SttEngine::Whisper => {
-            return Err("Use download_model_file for Whisper models".to_string());
-        }
+
+        total_downloaded += file_downloaded;
     }
 
     // Emit completion
-    let size = dir_size(&model_dir);
     let _ = app.emit(
         "download-progress",
         DownloadProgress {
-            bytes_downloaded: size,
-            total_bytes: size,
+            bytes_downloaded: total_downloaded,
+            total_bytes: total_downloaded,
         },
     );
 

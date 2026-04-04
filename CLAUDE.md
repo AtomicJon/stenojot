@@ -18,17 +18,17 @@ yarn test:ui:watch       # Frontend tests in watch mode
 yarn test:tauri          # Rust backend tests only (cargo test)
 
 # Linting & type-checking
-yarn lint                # ESLint + TypeScript type-check (frontend)
+yarn lint                # Both of the above
+yarn lint:ui             # ESLint + TypeScript type-check (frontend)
 yarn lint:tauri          # Clippy with -D warnings (Rust)
-yarn lint:all            # Both of the above
 
 # Formatting
-yarn format              # Prettier auto-fix (frontend)
-yarn format:check        # Prettier check only (frontend)
+yarn format              # Auto-fix both frontend + Rust
+yarn format:check        # Check both frontend + Rust
+yarn format:ui           # Prettier auto-fix (frontend)
+yarn format:ui:check     # Prettier check only (frontend)
 yarn format:tauri        # cargo fmt (Rust)
 yarn format:tauri:check  # cargo fmt --check (Rust)
-yarn format:all          # Auto-fix both frontend + Rust
-yarn format:all:check    # Check both frontend + Rust
 
 # Full CI check (runs locally what CI runs)
 yarn ci                  # format:all:check + lint:all + test

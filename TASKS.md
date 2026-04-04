@@ -1,0 +1,1 @@
+- Do not save or summerize if transcription is empty
