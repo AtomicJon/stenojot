@@ -54,7 +54,7 @@ React Router v7 with routes wrapped in a `Layout` shell. Currently: `/` (Recordi
 
 ## Coding Conventions
 
-### Style System (CRITICAL)
+### Style System
 
 **Goal:** Build a reusable style system that can evolve into a full component library. Every visual property must be driven by shared tokens — no one-off values anywhere. If a new value is needed, add it to the token files first, then reference it.
 
@@ -100,7 +100,7 @@ SCSS modules imported as `s` (`import s from "./ComponentName.module.scss"`).
 - All `pub` items (functions, structs, enums, modules) must have `///` doc comments. Use `//!` at the top of each module file to describe the module's purpose and role in the architecture.
 - Inline comments (`//`) for non-obvious logic — explain _why_, not _what_. Don't comment self-explanatory code.
 
-### Testing (CRITICAL)
+### Testing
 
 **Every new feature, function, or component must include tests.** Tests are not optional — they are part of the definition of done. Run `yarn test` before considering any task complete.
 

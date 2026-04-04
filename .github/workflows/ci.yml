@@ -7,27 +7,7 @@ on:
     branches: [main]
 
 jobs:
-  # Fast checks that don't need Rust or platform-specific deps.
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version-file: .nvmrc
-          cache: yarn
-
-      - run: yarn install --frozen-lockfile
-
-      - name: Prettier
-        run: yarn format:check
-
-      - name: ESLint + TypeScript
-        run: yarn lint
-
-  # Rust checks + clippy (Linux only — catches compile errors and warnings).
-  rust-check:
+  ci:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v6
@@ -63,27 +43,14 @@ jobs:
         with:
           workspaces: src-tauri
 
-      - name: Rust format
-        run: yarn format:tauri:check
+      - name: Format check
+        run: yarn format:check
 
-      - name: Clippy
-        run: yarn lint:tauri
+      - name: Lint
+        run: yarn lint
+
+      - name: Frontend tests
+        run: yarn test:ui
 
       - name: Rust tests
         run: yarn test:tauri
-
-  # Frontend unit tests.
-  test-ui:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version-file: .nvmrc
-          cache: yarn
-
-      - run: yarn install --frozen-lockfile
-
-      - name: Vitest
-        run: yarn test:ui

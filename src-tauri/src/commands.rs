@@ -89,9 +89,7 @@ impl AppState {
     /// Derives the engine from the model entry when possible so that the
     /// engine and model are always consistent, even if the UI updates
     /// `stt_engine` and `stt_model` independently.
-    pub fn resolve_engine_and_model(
-        &self,
-    ) -> (crate::transcription::engine::SttEngine, String) {
+    pub fn resolve_engine_and_model(&self) -> (crate::transcription::engine::SttEngine, String) {
         let engine = crate::transcription::engine::parse_engine(&self.stt_engine);
         let model_id = match engine {
             crate::transcription::engine::SttEngine::Whisper => self.whisper_model.clone(),
