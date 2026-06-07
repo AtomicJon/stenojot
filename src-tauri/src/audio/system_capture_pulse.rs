@@ -35,7 +35,7 @@ pub fn list_monitor_sources() -> Result<Vec<AudioDevice>, CaptureError> {
     let output = std::process::Command::new("pactl")
         .args(["list", "short", "sources"])
         .output()
-        .map_err(|e| CaptureError::StreamError(format!("Failed to run pactl: {}", e)))?;
+        .map_err(|e| CaptureError::StreamError(format!("Failed to run pactl: {e}")))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     Ok(parse_pactl_sources(&stdout))
@@ -97,9 +97,11 @@ pub struct SystemCaptureHandle {
 impl SystemCaptureHandle {
     /// Signal the capture thread to stop and wait for it to finish.
     pub fn stop(&mut self) {
-        self.running.store(false, Ordering::SeqCst);
+        self.running.store(false, Ordering::Release);
         if let Some(handle) = self.handle.take() {
-            let _ = handle.join();
+            if let Err(e) = handle.join() {
+                eprintln!("system capture thread panicked: {e:?}");
+            }
         }
     }
 }
@@ -136,8 +138,7 @@ pub fn start_system_capture(source_name: &str) -> Result<SystemCaptureHandle, Ca
     )
     .map_err(|e| {
         CaptureError::StreamError(format!(
-            "Failed to connect to PulseAudio source '{}': {}",
-            source, e
+            "Failed to connect to PulseAudio source '{source}': {e}"
         ))
     })?;
 
@@ -176,28 +177,29 @@ fn capture_loop(
     rms_level: Arc<AtomicU32>,
     running: Arc<AtomicBool>,
 ) {
-    // Buffer for reading raw bytes from PulseAudio (f32 = 4 bytes per sample)
+    // Read raw bytes from PulseAudio (f32le, 4 bytes per sample) and decode
+    // them via `f32::from_le_bytes` so we don't need any `unsafe` casts —
+    // alignment is irrelevant and the conversion is endianness-explicit.
     let mut byte_buf = vec![0u8; READ_SAMPLES * 4];
+    let mut samples = vec![0f32; READ_SAMPLES];
 
-    while running.load(Ordering::SeqCst) {
+    while running.load(Ordering::Relaxed) {
         if let Err(e) = simple.read(&mut byte_buf) {
-            eprintln!("PulseAudio read error: {}", e);
+            eprintln!("PulseAudio read error: {e}");
             break;
         }
 
-        // Convert raw bytes to f32 samples
-        let samples: &[f32] =
-            unsafe { std::slice::from_raw_parts(byte_buf.as_ptr() as *const f32, READ_SAMPLES) };
-
-        // Compute RMS
-        if !samples.is_empty() {
-            let sum_sq: f32 = samples.iter().map(|&s| s * s).sum();
-            let rms = (sum_sq / samples.len() as f32).sqrt();
-            rms_level.store(rms.to_bits(), Ordering::Relaxed);
+        for (sample, chunk) in samples.iter_mut().zip(byte_buf.chunks_exact(4)) {
+            *sample = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
         }
 
+        // Compute RMS
+        let sum_sq: f32 = samples.iter().map(|&s| s * s).sum();
+        let rms = (sum_sq / samples.len() as f32).sqrt();
+        rms_level.store(rms.to_bits(), Ordering::Relaxed);
+
         // Push into ring buffer
-        for &sample in samples {
+        for &sample in &samples {
             let _ = producer.try_push(sample);
         }
     }

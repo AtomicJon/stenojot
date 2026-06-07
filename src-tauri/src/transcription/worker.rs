@@ -136,19 +136,39 @@ impl TranscriptionWorker {
     }
 
     /// Get a snapshot of all accumulated segments so far.
+    ///
+    /// If the worker thread previously panicked while holding the segment
+    /// mutex, the lock will be poisoned. We recover the inner data instead
+    /// of silently returning an empty vector so callers still see whatever
+    /// was successfully transcribed before the panic.
     pub fn get_segments(&self) -> Vec<TranscriptSegment> {
-        self.shared_segments
-            .lock()
-            .map(|s| s.clone())
-            .unwrap_or_default()
+        match self.shared_segments.lock() {
+            Ok(guard) => guard.clone(),
+            Err(poisoned) => {
+                eprintln!("transcription worker segment mutex was poisoned");
+                poisoned.into_inner().clone()
+            }
+        }
     }
 
     /// Signal the worker to stop, wait for the thread to finish, and return
     /// all accumulated transcript segments from the recording session.
+    ///
+    /// If the worker thread panicked, the panic payload is logged and an
+    /// empty vector is returned (we cannot recover segments from a panicked
+    /// `JoinHandle`'s return value).
     pub fn stop(&mut self) -> Vec<TranscriptSegment> {
-        self.running.store(false, Ordering::SeqCst);
+        // `Release` is enough — the worker side reads with `Acquire`/`Relaxed`
+        // and we're not synchronising any other data through this flag.
+        self.running.store(false, Ordering::Release);
         if let Some(handle) = self.handle.take() {
-            handle.join().unwrap_or_default()
+            match handle.join() {
+                Ok(segments) => segments,
+                Err(panic_payload) => {
+                    eprintln!("transcription worker thread panicked: {panic_payload:?}");
+                    Vec::new()
+                }
+            }
         } else {
             Vec::new()
         }
@@ -201,8 +221,11 @@ fn worker_loop(
     let push_segment = |seg: TranscriptSegment,
                         all: &mut Vec<TranscriptSegment>,
                         shared: &Arc<Mutex<Vec<TranscriptSegment>>>| {
-        if let Ok(mut shared_segs) = shared.lock() {
-            shared_segs.push(seg.clone());
+        // Recover from poisoning rather than silently dropping segments —
+        // see `TranscriptionWorker::get_segments` for the rationale.
+        match shared.lock() {
+            Ok(mut shared_segs) => shared_segs.push(seg.clone()),
+            Err(poisoned) => poisoned.into_inner().push(seg.clone()),
         }
         all.push(seg);
     };

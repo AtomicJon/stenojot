@@ -4,7 +4,7 @@
 //! non-streaming mode. Requires an API key in the `Authorization: Bearer` header.
 
 use reqwest::blocking::Client;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use super::provider::{LlmClient, LlmConfig, LlmError, LlmResponse};
 
@@ -38,17 +38,11 @@ impl OpenAiClient {
     }
 }
 
-/// Request body for `POST /v1/chat/completions`.
-#[derive(Serialize)]
-struct CompletionsRequest {
-    model: String,
-    max_tokens: u32,
-    messages: Vec<ChatMessage>,
-}
-
-/// A single message in the OpenAI chat format.
-#[derive(Serialize, Deserialize, Clone)]
+/// A single message in the OpenAI chat format (response side only — the
+/// request body is built directly via the `json!` macro).
+#[derive(Deserialize, Clone)]
 struct ChatMessage {
+    #[allow(dead_code)]
     role: String,
     content: String,
 }
@@ -78,21 +72,17 @@ pub fn build_request_body(
     system_prompt: &str,
     user_prompt: &str,
 ) -> serde_json::Value {
-    serde_json::to_value(CompletionsRequest {
-        model: model.to_string(),
-        max_tokens: MAX_TOKENS,
-        messages: vec![
-            ChatMessage {
-                role: "system".to_string(),
-                content: system_prompt.to_string(),
-            },
-            ChatMessage {
-                role: "user".to_string(),
-                content: user_prompt.to_string(),
-            },
+    // Use the `json!` macro so serialisation is infallible — building a value
+    // from owned strings and primitives can never fail, so an `.expect()` here
+    // would be dead defensive code.
+    serde_json::json!({
+        "model": model,
+        "max_tokens": MAX_TOKENS,
+        "messages": [
+            { "role": "system", "content": system_prompt },
+            { "role": "user", "content": user_prompt },
         ],
     })
-    .expect("Failed to serialize OpenAI request")
 }
 
 /// Parse the OpenAI Chat Completions API response body into an [`LlmResponse`].

@@ -159,19 +159,16 @@ pub fn find_model_entry(model_id: &str) -> Option<ModelEntry> {
 /// The directory must exist or be creatable. Returns an error if the path
 /// is not a valid directory and cannot be created.
 pub fn set_models_dir(path: PathBuf) -> Result<(), String> {
-    fs::create_dir_all(&path).map_err(|e| format!("Failed to create models directory: {}", e))?;
-    let mut dir = CUSTOM_MODELS_DIR
-        .lock()
-        .map_err(|e| format!("Lock error: {}", e))?;
+    fs::create_dir_all(&path).map_err(|e| format!("Failed to create models directory: {e}"))?;
+    let mut dir = CUSTOM_MODELS_DIR.lock().unwrap_or_else(|p| p.into_inner());
     *dir = Some(path);
     Ok(())
 }
 
 /// Reset the models directory to the default location.
 pub fn reset_models_dir() {
-    if let Ok(mut dir) = CUSTOM_MODELS_DIR.lock() {
-        *dir = None;
-    }
+    let mut dir = CUSTOM_MODELS_DIR.lock().unwrap_or_else(|p| p.into_inner());
+    *dir = None;
 }
 
 /// Returns the directory where Whisper models are stored.
@@ -179,33 +176,29 @@ pub fn reset_models_dir() {
 /// Uses the custom directory if one has been set via [`set_models_dir`],
 /// otherwise falls back to `~/.local/share/stenojot/models/`.
 pub fn get_models_dir() -> PathBuf {
-    if let Ok(dir) = CUSTOM_MODELS_DIR.lock() {
-        if let Some(ref custom) = *dir {
-            return custom.clone();
-        }
+    let dir = CUSTOM_MODELS_DIR.lock().unwrap_or_else(|p| p.into_inner());
+    if let Some(ref custom) = *dir {
+        return custom.clone();
     }
+    drop(dir);
     default_models_dir()
 }
 
 /// Returns the custom models directory if one has been set, or `None`
 /// if using the default location.
 pub fn get_custom_models_dir() -> Option<PathBuf> {
-    if let Ok(dir) = CUSTOM_MODELS_DIR.lock() {
-        return dir.clone();
-    }
-    None
+    let dir = CUSTOM_MODELS_DIR.lock().unwrap_or_else(|p| p.into_inner());
+    dir.clone()
 }
 
 /// Returns the default models directory (`~/.local/share/stenojot/models/`).
+///
+/// Panics if `$HOME` is unset — silently storing user models in `/tmp` would
+/// lose them on the next reboot, which is worse than failing loudly.
 fn default_models_dir() -> PathBuf {
-    dirs_like_home().join(".local/share/stenojot/models")
-}
-
-/// Best-effort home directory lookup; falls back to `/tmp`.
-fn dirs_like_home() -> PathBuf {
-    std::env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("/tmp"))
+    let home = std::env::var("HOME")
+        .expect("HOME environment variable must be set to locate the models directory");
+    PathBuf::from(home).join(".local/share/stenojot/models")
 }
 
 /// Returns the expected filesystem path for a Whisper GGML model.
@@ -337,7 +330,7 @@ pub fn download_model_file(model_name: &str, app: &tauri::AppHandle) -> Result<P
     // Ensure parent directory exists
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create models directory: {}", e))?;
+            .map_err(|e| format!("Failed to create models directory: {e}"))?;
     }
 
     let url = get_download_url(model_name);

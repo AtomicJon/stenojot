@@ -1,11 +1,43 @@
 //! Tauri command handlers for audio capture and transcription management.
 
 use cpal::Stream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
+use tauri::async_runtime;
 use tauri::ipc::Channel;
 use tauri::{Emitter, State};
+
+/// Length of the `YYYYMMDD-HHMMSS - ` filename timestamp prefix used by
+/// transcript and summary files (see `markdown::write_transcript`).
+const FILENAME_TIMESTAMP_PREFIX_LEN: usize = 17;
+
+/// Newtype wrapper that asserts `cpal::Stream` is safe to send and drop
+/// across threads.
+///
+/// `cpal::Stream` is `!Send` because the underlying ALSA/CoreAudio handles
+/// are typically tied to the thread that created them. On Linux (cpal/ALSA)
+/// the stream is just a handle to a background callback thread and is safe
+/// to drop from any thread, which is the only operation we ever perform off
+/// the creating thread. The unsafe impl is scoped to this newtype so that
+/// future fields added to `AppState` don't accidentally inherit a blanket
+/// `Send` we never audited.
+pub struct SendStream(#[allow(dead_code)] pub Stream);
+
+// Safety: see SendStream docs.
+unsafe impl Send for SendStream {}
+// Safety: we never share &Stream across threads — every access goes through
+// the AppState mutex, which only hands out exclusive access. Sync is required
+// because Tauri's State<Mutex<AppState>> needs the inner type to be Sync.
+unsafe impl Sync for SendStream {}
+
+/// Lock the shared `AppState`, mapping a poisoned mutex into a user-facing
+/// error string. Centralised so every command formats the error consistently.
+fn lock_state<'a>(
+    state: &'a State<'_, Mutex<AppState>>,
+) -> Result<MutexGuard<'a, AppState>, String> {
+    state.lock().map_err(|e| format!("Lock error: {e}"))
+}
 
 use crate::audio::capture;
 use crate::audio::pipeline;
@@ -33,7 +65,7 @@ pub struct AppState {
     pub system_rms: Arc<AtomicU32>,
     pub mic_gain: Arc<AtomicU32>,
     pub vad_threshold: Arc<AtomicU32>,
-    pub mic_stream: Option<Stream>,
+    pub mic_stream: Option<SendStream>,
     pub system_capture: Option<SystemCaptureHandle>,
     pub worker: Option<TranscriptionWorker>,
     pub mic_sample_rate: u32,
@@ -75,13 +107,6 @@ pub struct AppState {
     /// Whether to auto-generate summaries after recording stops.
     pub auto_summary: bool,
 }
-
-// Safety: cpal::Stream is !Send and !Sync, but we only ever access it
-// while holding the Mutex lock from a single thread at a time.
-// The streams themselves are audio device handles that are safe to drop
-// from any thread.
-unsafe impl Send for AppState {}
-unsafe impl Sync for AppState {}
 
 impl AppState {
     /// Resolve the active engine and model ID.
@@ -167,7 +192,7 @@ fn save_current_settings(app_state: &AppState) {
         auto_summary: app_state.auto_summary,
     };
     if let Err(e) = settings::save(&app_state.config_dir, &settings) {
-        eprintln!("Failed to save settings: {}", e);
+        eprintln!("Failed to save settings: {e}");
     }
 }
 
@@ -190,7 +215,7 @@ pub fn get_system_audio_devices() -> Result<Vec<AudioDevice>, String> {
 /// Retrieve persisted application settings.
 #[tauri::command]
 pub fn get_settings(state: State<'_, Mutex<AppState>>) -> Result<Settings, String> {
-    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let app_state = lock_state(&state)?;
     Ok(settings::load(&app_state.config_dir))
 }
 
@@ -200,7 +225,7 @@ pub fn set_preferred_mic(
     device_id: String,
     state: State<'_, Mutex<AppState>>,
 ) -> Result<(), String> {
-    let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let mut app_state = lock_state(&state)?;
     app_state.preferred_mic_device_id = Some(device_id);
     save_current_settings(&app_state);
     Ok(())
@@ -212,7 +237,7 @@ pub fn set_preferred_system_device(
     device_id: String,
     state: State<'_, Mutex<AppState>>,
 ) -> Result<(), String> {
-    let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let mut app_state = lock_state(&state)?;
     app_state.preferred_system_device_id = Some(device_id);
     save_current_settings(&app_state);
     Ok(())
@@ -223,7 +248,7 @@ pub fn set_preferred_system_device(
 /// Pass an empty string to reset to the default (`~/StenoJot/`).
 #[tauri::command]
 pub fn set_output_dir(path: String, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
-    let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let mut app_state = lock_state(&state)?;
     app_state.output_dir = if path.is_empty() { None } else { Some(path) };
     save_current_settings(&app_state);
     Ok(())
@@ -232,7 +257,7 @@ pub fn set_output_dir(path: String, state: State<'_, Mutex<AppState>>) -> Result
 /// Get the resolved output directory path.
 #[tauri::command]
 pub fn get_output_dir(state: State<'_, Mutex<AppState>>) -> Result<String, String> {
-    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let app_state = lock_state(&state)?;
     let loaded = settings::load(&app_state.config_dir);
     Ok(loaded.output_dir_resolved().to_string_lossy().to_string())
 }
@@ -242,7 +267,7 @@ pub fn get_output_dir(state: State<'_, Mutex<AppState>>) -> Result<String, Strin
 /// Pass 0 to disable auto-stop.
 #[tauri::command]
 pub fn set_silence_timeout(seconds: u32, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
-    let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let mut app_state = lock_state(&state)?;
     app_state.silence_timeout_seconds = if seconds == 0 { None } else { Some(seconds) };
     save_current_settings(&app_state);
     Ok(())
@@ -254,7 +279,7 @@ pub fn set_silence_timeout(seconds: u32, state: State<'_, Mutex<AppState>>) -> R
 /// Quantized variants like "base-q5_1" and "small-q5_1" are also accepted.
 #[tauri::command]
 pub fn set_whisper_model(model: String, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
-    let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let mut app_state = lock_state(&state)?;
     app_state.whisper_model = model;
     save_current_settings(&app_state);
     Ok(())
@@ -263,7 +288,7 @@ pub fn set_whisper_model(model: String, state: State<'_, Mutex<AppState>>) -> Re
 /// Set and persist the active STT engine.
 #[tauri::command]
 pub fn set_stt_engine(engine: String, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
-    let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let mut app_state = lock_state(&state)?;
     // Validate the engine name
     let _ = crate::transcription::engine::parse_engine(&engine);
     app_state.stt_engine = engine;
@@ -274,7 +299,7 @@ pub fn set_stt_engine(engine: String, state: State<'_, Mutex<AppState>>) -> Resu
 /// Set and persist the model for the current non-Whisper STT engine.
 #[tauri::command]
 pub fn set_stt_model(model: String, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
-    let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let mut app_state = lock_state(&state)?;
     app_state.stt_model = if model.is_empty() { None } else { Some(model) };
     save_current_settings(&app_state);
     Ok(())
@@ -293,7 +318,7 @@ pub fn get_engine_models(engine: String) -> Vec<manager::ModelEntry> {
 /// recognition accuracy. Pass an empty string to clear.
 #[tauri::command]
 pub fn set_initial_prompt(prompt: String, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
-    let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let mut app_state = lock_state(&state)?;
     app_state.initial_prompt = if prompt.is_empty() {
         None
     } else {
@@ -312,7 +337,7 @@ pub fn set_max_segment_seconds(
     seconds: u32,
     state: State<'_, Mutex<AppState>>,
 ) -> Result<(), String> {
-    let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let mut app_state = lock_state(&state)?;
     app_state.max_segment_seconds = seconds.clamp(1, 30);
     save_current_settings(&app_state);
     Ok(())
@@ -340,7 +365,7 @@ pub fn start_recording(
     state: State<'_, Mutex<AppState>>,
     app: tauri::AppHandle,
 ) -> Result<StartRecordingResult, String> {
-    let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let mut app_state = lock_state(&state)?;
 
     if app_state.is_recording {
         return Err(CaptureError::AlreadyRecording.to_string());
@@ -352,8 +377,7 @@ pub fn start_recording(
     // Ensure the model is available before starting
     if !manager::engine_model_exists(engine, &model_id) {
         return Err(format!(
-            "{} model '{}' not downloaded. Download it from Settings first.",
-            engine, model_id
+            "{engine} model '{model_id}' not downloaded. Download it from Settings first."
         ));
     }
     let model_path = manager::get_engine_model_path(engine, &model_id);
@@ -404,7 +428,7 @@ pub fn start_recording(
     let transcript_path =
         markdown::write_transcript(&output_dir, &[], &meeting_name, start_time, start_time)?;
 
-    app_state.mic_stream = Some(mic_handle.stream);
+    app_state.mic_stream = Some(SendStream(mic_handle.stream));
     app_state.system_capture = Some(system_handle);
     app_state.mic_device_id = Some(mic_device_id);
     app_state.system_device_id = Some(system_device_id);
@@ -445,7 +469,7 @@ pub fn stop_recording(
     state: State<'_, Mutex<AppState>>,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
-    let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let mut app_state = lock_state(&state)?;
 
     if !app_state.is_recording {
         return Err(CaptureError::NotRecording.to_string());
@@ -490,7 +514,7 @@ pub fn stop_recording(
     drop(app_state);
 
     let app_handle = app.clone();
-    std::thread::spawn(move || {
+    async_runtime::spawn_blocking(move || {
         // Stop system capture thread (may block briefly)
         if let Some(ref mut sys) = system_capture {
             sys.stop();
@@ -514,7 +538,7 @@ pub fn stop_recording(
             if let Err(e) =
                 markdown::update_transcript(path, &segments, &name_str, start_time, end_time)
             {
-                eprintln!("Failed to write final transcript: {}", e);
+                eprintln!("Failed to write final transcript: {e}");
             }
             Some(path.to_string_lossy().to_string())
         } else {
@@ -558,7 +582,7 @@ pub fn stop_recording(
                         let _ = app_handle.emit("meetings-changed", ());
                     }
                     Err(e) => {
-                        eprintln!("Summary generation failed: {}", e);
+                        eprintln!("Summary generation failed: {e}");
                         let _ = app_handle.emit("summary-error", e.to_string());
                     }
                 }
@@ -583,7 +607,7 @@ struct SummaryEvent {
 /// Get current audio input levels for the mic and system streams.
 #[tauri::command]
 pub fn get_audio_levels(state: State<'_, Mutex<AppState>>) -> Result<AudioLevels, String> {
-    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let app_state = lock_state(&state)?;
 
     let mic_rms = f32::from_bits(app_state.mic_rms.load(Ordering::Relaxed));
     let system_rms = f32::from_bits(app_state.system_rms.load(Ordering::Relaxed));
@@ -609,7 +633,7 @@ pub fn get_audio_levels(state: State<'_, Mutex<AppState>>) -> Result<AudioLevels
 /// The new value is automatically persisted to disk.
 #[tauri::command]
 pub fn set_mic_gain(gain: f32, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
-    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let app_state = lock_state(&state)?;
     let clamped = gain.clamp(0.1, 10.0);
     app_state
         .mic_gain
@@ -621,7 +645,7 @@ pub fn set_mic_gain(gain: f32, state: State<'_, Mutex<AppState>>) -> Result<(), 
 /// Get the current microphone gain multiplier.
 #[tauri::command]
 pub fn get_mic_gain(state: State<'_, Mutex<AppState>>) -> Result<f32, String> {
-    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let app_state = lock_state(&state)?;
     Ok(f32::from_bits(app_state.mic_gain.load(Ordering::Relaxed)))
 }
 
@@ -632,7 +656,7 @@ pub fn get_mic_gain(state: State<'_, Mutex<AppState>>) -> Result<f32, String> {
 /// The new value is automatically persisted to disk.
 #[tauri::command]
 pub fn set_vad_threshold(threshold: f32, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
-    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let app_state = lock_state(&state)?;
     let clamped = threshold.clamp(0.0005, 0.1);
     app_state
         .vad_threshold
@@ -644,7 +668,7 @@ pub fn set_vad_threshold(threshold: f32, state: State<'_, Mutex<AppState>>) -> R
 /// Get the current VAD sensitivity threshold.
 #[tauri::command]
 pub fn get_vad_threshold(state: State<'_, Mutex<AppState>>) -> Result<f32, String> {
-    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let app_state = lock_state(&state)?;
     Ok(f32::from_bits(
         app_state.vad_threshold.load(Ordering::Relaxed),
     ))
@@ -655,7 +679,7 @@ pub fn get_vad_threshold(state: State<'_, Mutex<AppState>>) -> Result<f32, Strin
 /// Uses the current engine setting to determine which model to query.
 #[tauri::command]
 pub fn get_model_info(state: State<'_, Mutex<AppState>>) -> Result<ModelInfo, String> {
-    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let app_state = lock_state(&state)?;
     let (engine, model_id) = app_state.resolve_engine_and_model();
     Ok(manager::get_engine_model_info(engine, &model_id))
 }
@@ -663,7 +687,7 @@ pub fn get_model_info(state: State<'_, Mutex<AppState>>) -> Result<ModelInfo, St
 /// Delete the downloaded model file or directory.
 #[tauri::command]
 pub fn delete_model(state: State<'_, Mutex<AppState>>) -> Result<(), String> {
-    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let app_state = lock_state(&state)?;
     let (engine, model_id) = app_state.resolve_engine_and_model();
     manager::delete_engine_model(engine, &model_id)
 }
@@ -679,7 +703,7 @@ pub fn set_models_dir(path: String, state: State<'_, Mutex<AppState>>) -> Result
     } else {
         manager::set_models_dir(std::path::PathBuf::from(path))?;
     }
-    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let app_state = lock_state(&state)?;
     save_current_settings(&app_state);
     Ok(())
 }
@@ -695,12 +719,12 @@ pub fn download_model(
     app: tauri::AppHandle,
     state: State<'_, Mutex<AppState>>,
 ) -> Result<(), String> {
-    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let app_state = lock_state(&state)?;
     let (engine, model_id) = app_state.resolve_engine_and_model();
     drop(app_state); // Release lock before spawning
 
     let app_handle = app.clone();
-    std::thread::spawn(move || {
+    async_runtime::spawn_blocking(move || {
         let result = match engine {
             crate::transcription::engine::SttEngine::Whisper => {
                 manager::download_model_file(&model_id, &app_handle)
@@ -712,7 +736,7 @@ pub fn download_model(
                 let _ = app_handle.emit("download-complete", path.to_string_lossy().to_string());
             }
             Err(e) => {
-                eprintln!("Model download failed: {}", e);
+                eprintln!("Model download failed: {e}");
                 let _ = app_handle.emit("download-error", e);
             }
         }
@@ -726,23 +750,34 @@ pub fn download_model(
 pub fn list_meetings(
     state: State<'_, Mutex<AppState>>,
 ) -> Result<Vec<markdown::MeetingEntry>, String> {
-    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let app_state = lock_state(&state)?;
     let loaded = settings::load(&app_state.config_dir);
     let output_dir = loaded.output_dir_resolved();
     Ok(markdown::list_meetings_in_dir(&output_dir))
 }
 
 /// Read the contents of a transcript file.
+///
+/// The path is constrained to live under the configured output directory to
+/// prevent the renderer from reading arbitrary files via this command.
 #[tauri::command]
-pub fn read_meeting_transcript(path: String) -> Result<String, String> {
-    std::fs::read_to_string(&path).map_err(|e| format!("Failed to read transcript: {}", e))
+pub fn read_meeting_transcript(
+    path: String,
+    state: State<'_, Mutex<AppState>>,
+) -> Result<String, String> {
+    let app_state = lock_state(&state)?;
+    let loaded = settings::load(&app_state.config_dir);
+    let output_dir = loaded.output_dir_resolved();
+    drop(app_state);
+    let resolved = ensure_path_within(&output_dir, Path::new(&path))?;
+    std::fs::read_to_string(&resolved).map_err(|e| format!("Failed to read transcript: {e}"))
 }
 
 /// Pause the current recording session. Audio streams continue but samples
 /// are discarded.
 #[tauri::command]
 pub fn pause_recording(state: State<'_, Mutex<AppState>>) -> Result<(), String> {
-    let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let mut app_state = lock_state(&state)?;
     if !app_state.is_recording {
         return Err(CaptureError::NotRecording.to_string());
     }
@@ -756,7 +791,7 @@ pub fn pause_recording(state: State<'_, Mutex<AppState>>) -> Result<(), String> 
 /// Resume a paused recording session.
 #[tauri::command]
 pub fn resume_recording(state: State<'_, Mutex<AppState>>) -> Result<(), String> {
-    let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let mut app_state = lock_state(&state)?;
     if !app_state.is_recording {
         return Err(CaptureError::NotRecording.to_string());
     }
@@ -776,7 +811,7 @@ pub fn save_current_transcript(
     state: State<'_, Mutex<AppState>>,
     app: tauri::AppHandle,
 ) -> Result<usize, String> {
-    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let app_state = lock_state(&state)?;
 
     if !app_state.is_recording {
         return Err(CaptureError::NotRecording.to_string());
@@ -816,7 +851,7 @@ pub fn save_current_transcript(
 /// Valid values: "ollama", "anthropic", "openai". Unknown values default to "ollama".
 #[tauri::command]
 pub fn set_llm_provider(provider: String, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
-    let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let mut app_state = lock_state(&state)?;
     // Validate and normalize the provider string
     let normalized = parse_provider(&provider).to_string();
     app_state.llm_provider = normalized;
@@ -829,7 +864,7 @@ pub fn set_llm_provider(provider: String, state: State<'_, Mutex<AppState>>) -> 
 /// Pass an empty string to use the provider's default model.
 #[tauri::command]
 pub fn set_llm_model(model: String, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
-    let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let mut app_state = lock_state(&state)?;
     app_state.llm_model = if model.is_empty() { None } else { Some(model) };
     save_current_settings(&app_state);
     Ok(())
@@ -840,7 +875,7 @@ pub fn set_llm_model(model: String, state: State<'_, Mutex<AppState>>) -> Result
 /// Pass an empty string to clear the key.
 #[tauri::command]
 pub fn set_llm_api_key(key: String, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
-    let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let mut app_state = lock_state(&state)?;
     app_state.llm_api_key = if key.is_empty() { None } else { Some(key) };
     save_current_settings(&app_state);
     Ok(())
@@ -851,7 +886,7 @@ pub fn set_llm_api_key(key: String, state: State<'_, Mutex<AppState>>) -> Result
 /// Pass an empty string to use the provider's default URL.
 #[tauri::command]
 pub fn set_llm_base_url(url: String, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
-    let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let mut app_state = lock_state(&state)?;
     app_state.llm_base_url = if url.is_empty() { None } else { Some(url) };
     save_current_settings(&app_state);
     Ok(())
@@ -860,7 +895,7 @@ pub fn set_llm_base_url(url: String, state: State<'_, Mutex<AppState>>) -> Resul
 /// Enable or disable automatic summary generation after recording stops.
 #[tauri::command]
 pub fn set_auto_summary(enabled: bool, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
-    let mut app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let mut app_state = lock_state(&state)?;
     app_state.auto_summary = enabled;
     save_current_settings(&app_state);
     Ok(())
@@ -876,7 +911,7 @@ pub fn generate_summary(
     state: State<'_, Mutex<AppState>>,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
-    let app_state = state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let app_state = lock_state(&state)?;
 
     let config = LlmConfig {
         provider: parse_provider(&app_state.llm_provider),
@@ -891,22 +926,23 @@ pub fn generate_summary(
 
     let tx_path = PathBuf::from(&transcript_path);
 
-    // Parse meeting name and start time from the transcript filename
+    // Parse meeting name from the transcript filename. Filenames are written
+    // by `markdown::write_transcript` as `YYYYMMDD-HHMMSS - <name>.<suffix>`,
+    // so we strip the timestamp prefix and the transcript suffix.
     let filename = tx_path
         .file_name()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .to_string();
+        .map(|n| n.to_string_lossy().into_owned())
+        .ok_or("Transcript path has no filename")?;
     let meeting_name = filename
         .strip_suffix(markdown::TRANSCRIPT_SUFFIX)
-        .and_then(|stem| stem.get(17..))
+        .and_then(|stem| stem.get(FILENAME_TIMESTAMP_PREFIX_LEN..))
         .map(|n| n.trim().to_string())
         .unwrap_or_else(|| "Meeting".to_string());
 
     let now = chrono::Local::now();
 
     let app_handle = app.clone();
-    std::thread::spawn(move || {
+    async_runtime::spawn_blocking(move || {
         let _ = app_handle.emit("summary-generating", ());
         match llm::summary::generate_summary(&config, &tx_path, &out_dir, now, now, &meeting_name) {
             Ok(result) => {
@@ -931,9 +967,38 @@ pub fn generate_summary(
 }
 
 /// Read the contents of a summary file.
+///
+/// Constrained to the configured output directory — see
+/// [`read_meeting_transcript`].
 #[tauri::command]
-pub fn read_meeting_summary(path: String) -> Result<String, String> {
-    std::fs::read_to_string(&path).map_err(|e| format!("Failed to read summary: {}", e))
+pub fn read_meeting_summary(
+    path: String,
+    state: State<'_, Mutex<AppState>>,
+) -> Result<String, String> {
+    let app_state = lock_state(&state)?;
+    let loaded = settings::load(&app_state.config_dir);
+    let output_dir = loaded.output_dir_resolved();
+    drop(app_state);
+    let resolved = ensure_path_within(&output_dir, Path::new(&path))?;
+    std::fs::read_to_string(&resolved).map_err(|e| format!("Failed to read summary: {e}"))
+}
+
+/// Resolve `candidate` and ensure the canonical form lies under `root`.
+///
+/// Both paths are canonicalised so that `..`, symlinks, and relative
+/// segments cannot escape `root`. Returns the canonical candidate on
+/// success or an error suitable for returning to the renderer.
+fn ensure_path_within(root: &Path, candidate: &Path) -> Result<PathBuf, String> {
+    let canonical_root = root
+        .canonicalize()
+        .map_err(|e| format!("Invalid output directory: {e}"))?;
+    let canonical_candidate = candidate
+        .canonicalize()
+        .map_err(|e| format!("File not found: {e}"))?;
+    if !canonical_candidate.starts_with(&canonical_root) {
+        return Err("Path is outside the configured output directory".to_string());
+    }
+    Ok(canonical_candidate)
 }
 
 /// Refresh the system tray menu to reflect the current recording state.
