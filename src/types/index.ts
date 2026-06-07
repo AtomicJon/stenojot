@@ -39,6 +39,7 @@ export interface PersistedSettings {
   system_device_id: string | null;
   mic_gain: number;
   vad_threshold: number;
+  vad_engine: string;
   models_dir: string | null;
   output_dir: string | null;
   silence_timeout_seconds: number | null;

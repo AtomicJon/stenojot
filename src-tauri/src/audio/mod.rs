@@ -7,3 +7,4 @@ pub mod system_capture;
 #[path = "system_capture_stub.rs"]
 pub mod system_capture;
 pub mod types;
+pub mod vad;

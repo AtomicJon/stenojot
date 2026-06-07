@@ -48,6 +48,12 @@ React hook → `src/lib/commands.ts` wrapper → `invoke()` → Rust `#[tauri::c
 
 React Router v7 with routes wrapped in a `Layout` shell. Currently: `/` (RecordingPage), `/meetings` (MeetingsPage), `/settings` (SettingsPage).
 
+### Voice Activity Detection & Segmentation
+
+`src-tauri/src/audio/vad/` turns the live audio stream into tight speech segments so the STT engine never sees long silence-padded buffers (which make models like Parakeet drop short utterances). A `Vad` trait (frame-level speech *probability*) has three backends selected via `VadKind`: **Silero v5** (default, neural — run directly on `ort` with the bundled `resources/vad/silero_vad.onnx`), **TEN** (neural, via the `ten-vad-rs` crate + `ten-vad.onnx`), and **Energy** (legacy RMS fallback). A `Segmenter` state machine consumes frames and emits segments using speech onset confirmation, a silence hangover, a pre-roll ring (captures a word's attack), max-segment force-cut, and short-segment zero-padding. The worker (`transcription/worker.rs`) runs one `Segmenter` per stream (mic + system each own their VAD instance — neural backends are stateful). Selectable in Settings via `vad_engine`.
+
+**ONNX Runtime constraint:** `ort` release candidates are mutually incompatible and only one can be linked. The bundled VAD crates must match `transcribe-rs`'s pinned `ort` (currently `2.0.0-rc.12`) — `ten-vad-rs` does; the `voice_activity_detector` Silero crate does not (it pins rc.10), which is why Silero is run directly on the shared `ort` instead.
+
 ### LLM Integration
 
 `src-tauri/src/llm/` module provides trait-based LLM provider abstraction. `LlmClient` trait with implementations for Ollama, Anthropic, and OpenAI. Summary generation runs on a background `std::thread` using `reqwest::blocking`. Chunked summarization for long transcripts (iterative refinement). Background tasks communicate results via Tauri events (`summary-generating`, `summary-generated`, `summary-error`).

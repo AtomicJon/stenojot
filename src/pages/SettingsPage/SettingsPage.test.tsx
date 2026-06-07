@@ -37,6 +37,7 @@ vi.mock('../../lib/commands', () => ({
   setWhisperModel: vi.fn(),
   setSttEngine: vi.fn(),
   setSttModel: vi.fn(),
+  setVadEngine: vi.fn(),
   getEngineModels: vi.fn(),
   setInitialPrompt: vi.fn(),
   setMaxSegmentSeconds: vi.fn(),
@@ -65,6 +66,7 @@ import {
   getSettings,
   getOutputDir,
   getEngineModels,
+  setVadEngine,
 } from '../../lib/commands';
 
 const mockGetModelInfo = vi.mocked(getModelInfo);
@@ -72,6 +74,7 @@ const mockDownloadModel = vi.mocked(downloadModel);
 const mockGetSettings = vi.mocked(getSettings);
 const mockGetOutputDir = vi.mocked(getOutputDir);
 const mockGetEngineModels = vi.mocked(getEngineModels);
+const mockSetVadEngine = vi.mocked(setVadEngine);
 
 /* ── Fixtures ────────────────────────────────────────────────────── */
 
@@ -98,6 +101,7 @@ const defaultSettings: PersistedSettings = {
   system_device_id: null,
   mic_gain: 1.0,
   vad_threshold: 0.01,
+  vad_engine: 'silero',
   models_dir: null,
   output_dir: null,
   stt_engine: 'whisper',
@@ -159,6 +163,41 @@ describe('SettingsPage', () => {
     // Assert
     await waitFor(() => {
       expect(screen.getByText('Delete Model')).toBeInTheDocument();
+    });
+  });
+
+  it('loads the persisted VAD backend into the selector', async () => {
+    // Arrange
+    mockGetModelInfo.mockResolvedValue(downloadedModel);
+    mockGetSettings.mockResolvedValue({
+      ...defaultSettings,
+      vad_engine: 'ten',
+    });
+
+    // Act
+    renderPage();
+
+    // Assert
+    await waitFor(() => {
+      const select = screen.getByLabelText(
+        'Voice detection',
+      ) as HTMLSelectElement;
+      expect(select.value).toBe('ten');
+    });
+  });
+
+  it('persists a new VAD backend when the selector changes', async () => {
+    // Arrange
+    mockGetModelInfo.mockResolvedValue(downloadedModel);
+    renderPage();
+    const select = await screen.findByLabelText('Voice detection');
+
+    // Act
+    fireEvent.change(select, { target: { value: 'energy' } });
+
+    // Assert
+    await waitFor(() => {
+      expect(mockSetVadEngine).toHaveBeenCalledWith('energy');
     });
   });
 

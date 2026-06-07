@@ -41,6 +41,7 @@ pub fn run() {
 
             app_state.output_dir = persisted.output_dir;
             app_state.silence_timeout_seconds = persisted.silence_timeout_seconds;
+            app_state.vad_engine = persisted.vad_engine;
             app_state.stt_engine = persisted.stt_engine;
             app_state.whisper_model = persisted.whisper_model;
             app_state.stt_model = persisted.stt_model;
@@ -74,6 +75,8 @@ pub fn run() {
             commands::get_mic_gain,
             commands::set_vad_threshold,
             commands::get_vad_threshold,
+            commands::set_vad_engine,
+            commands::get_vad_engine,
             commands::get_model_info,
             commands::delete_model,
             commands::set_models_dir,

@@ -93,6 +93,19 @@ export function getVadThreshold(): Promise<number> {
   return invoke<number>('get_vad_threshold');
 }
 
+/**
+ * Set and persist the active VAD backend used for speech segmentation.
+ * @param engine - Backend identifier ("silero", "ten", or "energy")
+ */
+export function setVadEngine(engine: string): Promise<void> {
+  return invoke('set_vad_engine', { engine });
+}
+
+/** Get the current VAD backend identifier. */
+export function getVadEngine(): Promise<string> {
+  return invoke<string>('get_vad_engine');
+}
+
 /** Retrieve persisted application settings from disk. */
 export function getSettings(): Promise<PersistedSettings> {
   return invoke<PersistedSettings>('get_settings');

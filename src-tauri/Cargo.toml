@@ -32,6 +32,11 @@ rubato = "0.15"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros"] }
 whisper-rs = "0.16"
 transcribe-rs = { version = "0.3", features = ["onnx"] }
+# Neural VAD: Silero runs directly on `ort` (matches transcribe-rs's pinned version,
+# so only one ONNX Runtime is linked); TEN VAD via its own crate.
+ort = { version = "2.0.0-rc.12", features = ["ndarray"] }
+ndarray = "0.17"
+ten-vad-rs = "0.1.7"
 reqwest = { version = "0.12", features = ["blocking", "stream", "json"] }
 chrono = "0.4"
 dirs = "6"

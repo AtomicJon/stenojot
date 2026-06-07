@@ -43,6 +43,7 @@ use crate::audio::capture;
 use crate::audio::pipeline;
 use crate::audio::system_capture::{self, SystemCaptureHandle};
 use crate::audio::types::{AudioDevice, AudioLevels, CaptureError, TranscriptSegment};
+use crate::audio::vad;
 use crate::llm;
 use crate::llm::provider::{parse_provider, LlmConfig};
 use crate::markdown;
@@ -65,6 +66,8 @@ pub struct AppState {
     pub system_rms: Arc<AtomicU32>,
     pub mic_gain: Arc<AtomicU32>,
     pub vad_threshold: Arc<AtomicU32>,
+    /// Selected VAD backend ("silero", "ten", or "energy").
+    pub vad_engine: String,
     pub mic_stream: Option<SendStream>,
     pub system_capture: Option<SystemCaptureHandle>,
     pub worker: Option<TranscriptionWorker>,
@@ -142,6 +145,7 @@ impl AppState {
             system_rms: Arc::new(AtomicU32::new(0)),
             mic_gain: Arc::new(AtomicU32::new(1.0f32.to_bits())),
             vad_threshold: Arc::new(AtomicU32::new(pipeline::DEFAULT_VAD_THRESHOLD.to_bits())),
+            vad_engine: settings::DEFAULT_VAD_ENGINE.to_string(),
             mic_stream: None,
             system_capture: None,
             worker: None,
@@ -177,6 +181,7 @@ fn save_current_settings(app_state: &AppState) {
         system_device_id: app_state.preferred_system_device_id.clone(),
         mic_gain: f32::from_bits(app_state.mic_gain.load(Ordering::Relaxed)),
         vad_threshold: f32::from_bits(app_state.vad_threshold.load(Ordering::Relaxed)),
+        vad_engine: app_state.vad_engine.clone(),
         models_dir: manager::get_custom_models_dir().map(|p| p.to_string_lossy().to_string()),
         output_dir: app_state.output_dir.clone(),
         silence_timeout_seconds: app_state.silence_timeout_seconds,
@@ -413,6 +418,7 @@ pub fn start_recording(
         system_sample_rate: app_state.system_sample_rate,
         system_channels: app_state.system_channels,
         vad_threshold: Arc::clone(&app_state.vad_threshold),
+        vad_kind: vad::parse_vad_kind(&app_state.vad_engine),
         silence_timeout_seconds: app_state.silence_timeout_seconds,
         initial_prompt: app_state.initial_prompt.clone(),
         max_segment_seconds: app_state.max_segment_seconds,
@@ -672,6 +678,26 @@ pub fn get_vad_threshold(state: State<'_, Mutex<AppState>>) -> Result<f32, Strin
     Ok(f32::from_bits(
         app_state.vad_threshold.load(Ordering::Relaxed),
     ))
+}
+
+/// Set and persist the active VAD backend ("silero", "ten", or "energy").
+///
+/// Unrecognized values are normalized to the default backend. Takes effect on
+/// the next recording (the worker builds its detectors at start).
+#[tauri::command]
+pub fn set_vad_engine(engine: String, state: State<'_, Mutex<AppState>>) -> Result<(), String> {
+    let mut app_state = lock_state(&state)?;
+    // Normalize through the parser so only valid identifiers are stored.
+    app_state.vad_engine = vad::parse_vad_kind(&engine).to_string();
+    save_current_settings(&app_state);
+    Ok(())
+}
+
+/// Get the current VAD backend identifier.
+#[tauri::command]
+pub fn get_vad_engine(state: State<'_, Mutex<AppState>>) -> Result<String, String> {
+    let app_state = lock_state(&state)?;
+    Ok(app_state.vad_engine.clone())
 }
 
 /// Get detailed info about the active model (path, size, download status).

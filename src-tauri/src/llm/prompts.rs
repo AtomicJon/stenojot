@@ -126,15 +126,15 @@ mod tests {
 
     #[test]
     fn default_chunk_size_is_reasonable() {
-        // Arrange / Act / Assert
-        assert!(DEFAULT_CHUNK_SIZE >= 10_000);
-        assert!(DEFAULT_CHUNK_SIZE <= 100_000);
+        // Arrange / Act / Assert — compile-time bounds on the constant
+        const { assert!(DEFAULT_CHUNK_SIZE >= 10_000) };
+        const { assert!(DEFAULT_CHUNK_SIZE <= 100_000) };
     }
 
     #[test]
     fn title_max_chars_is_reasonable() {
-        // Arrange / Act / Assert
-        assert!(TITLE_MAX_CHARS >= 500);
-        assert!(TITLE_MAX_CHARS <= 10_000);
+        // Arrange / Act / Assert — compile-time bounds on the constant
+        const { assert!(TITLE_MAX_CHARS >= 500) };
+        const { assert!(TITLE_MAX_CHARS <= 10_000) };
     }
 }

@@ -12,6 +12,7 @@ import {
   setWhisperModel,
   setSttEngine,
   setSttModel,
+  setVadEngine,
   getEngineModels,
   setInitialPrompt,
   setMaxSegmentSeconds,
@@ -60,6 +61,7 @@ export function SettingsPage() {
   const [silenceTimeout, setSilenceTimeoutState] = useState<number>(300);
   const [timeoutSaved, setTimeoutSaved] = useState(false);
   const [sttEngine, setSttEngineState] = useState('whisper');
+  const [vadEngine, setVadEngineState] = useState('silero');
   const [whisperModel, setWhisperModelState] = useState('base');
   const [sttModel, setSttModelState] = useState<string | null>(null);
   const [engineModelOptions, setEngineModelOptions] = useState<ModelEntry[]>(
@@ -100,6 +102,7 @@ export function SettingsPage() {
         setOutputDirState(dir);
         setSilenceTimeoutState(settings.silence_timeout_seconds ?? 0);
         setSttEngineState(settings.stt_engine);
+        setVadEngineState(settings.vad_engine);
         setWhisperModelState(settings.whisper_model);
         setSttModelState(settings.stt_model);
         setInitialPromptState(settings.initial_prompt ?? '');
@@ -236,6 +239,16 @@ export function SettingsPage() {
       console.error('Failed to set silence timeout:', err);
     }
   }, [silenceTimeout]);
+
+  /** Change the VAD backend used for speech detection. */
+  const handleVadEngineChange = useCallback(async (engine: string) => {
+    setVadEngineState(engine);
+    try {
+      await setVadEngine(engine);
+    } catch (err) {
+      console.error('Failed to set VAD engine:', err);
+    }
+  }, []);
 
   /** Change the STT engine and update the model list. */
   const handleEngineChange = useCallback(
@@ -416,6 +429,17 @@ export function SettingsPage() {
                 label: m.label,
               }))}
               onChange={handleModelChange}
+              disabled={isRecording}
+            />
+            <Select
+              label="Voice detection"
+              value={vadEngine}
+              options={[
+                { value: 'silero', label: 'Silero (neural)' },
+                { value: 'ten', label: 'TEN (neural)' },
+                { value: 'energy', label: 'Energy (basic)' },
+              ]}
+              onChange={handleVadEngineChange}
               disabled={isRecording}
             />
           </div>

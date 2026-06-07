@@ -18,12 +18,9 @@ use tauri::ipc::Channel;
 
 use crate::audio::pipeline;
 use crate::audio::types::{Speaker, TranscriptSegment};
+use crate::audio::vad::{self, Segmenter, SegmenterConfig, VadKind};
 
 use super::engine::{self, SttBackend, SttEngine};
-
-/// Number of 16 kHz samples for segment overlap (~300ms).
-/// Prepended to the next segment to prevent word truncation at boundaries.
-const OVERLAP_SAMPLES: usize = 4_800;
 
 /// Configuration for starting a transcription worker.
 ///
@@ -46,8 +43,10 @@ pub struct WorkerConfig {
     pub system_sample_rate: u32,
     /// Channel count of the system capture.
     pub system_channels: u16,
-    /// Shared VAD threshold value.
+    /// Shared VAD threshold value (used only by the energy VAD backend).
     pub vad_threshold: Arc<AtomicU32>,
+    /// Which VAD backend to use for speech segmentation.
+    pub vad_kind: VadKind,
     /// Auto-stop after this many seconds of silence.
     pub silence_timeout_seconds: Option<u32>,
     /// Optional prompt to guide transcription (domain terms, names).
@@ -195,6 +194,7 @@ fn worker_loop(
         system_sample_rate,
         system_channels,
         vad_threshold,
+        vad_kind,
         silence_timeout_seconds,
         initial_prompt,
         max_segment_seconds,
@@ -210,8 +210,15 @@ fn worker_loop(
         }
     };
 
-    // Compute max segment size in 16 kHz samples from the configured seconds
-    let segment_samples = (max_segment_seconds.clamp(1, 30) as usize) * 16_000;
+    // Build one segmenter per stream. Each owns its own VAD instance because
+    // the neural backends carry recurrent state that must not be shared.
+    let energy_threshold = f32::from_bits(vad_threshold.load(Ordering::Relaxed));
+    let seg_config = SegmenterConfig {
+        max_segment_ms: max_segment_seconds.clamp(1, 30) * 1_000,
+        ..Default::default()
+    };
+    let mut mic_segmenter = build_segmenter(vad_kind, energy_threshold, seg_config);
+    let mut system_segmenter = build_segmenter(vad_kind, energy_threshold, seg_config);
 
     let recording_start = Instant::now();
     let mut all_segments: Vec<TranscriptSegment> = Vec::new();
@@ -230,116 +237,65 @@ fn worker_loop(
         all.push(seg);
     };
 
-    // Accumulated raw samples (at source rate/channels) for each stream
+    // Reused buffers for draining the ring buffers each poll.
     let mut mic_raw_buf: Vec<f32> = Vec::new();
     let mut system_raw_buf: Vec<f32> = Vec::new();
 
-    // Overlap buffers: tail of the previous 16 kHz mono segment, prepended
-    // to the next segment so the engine has context across boundaries and
-    // doesn't truncate words at the cut point.
-    let mut mic_overlap: Vec<f32> = Vec::new();
-    let mut system_overlap: Vec<f32> = Vec::new();
-
-    // Track segment start times in milliseconds
-    let mut mic_segment_start_ms: u64 = 0;
-    let mut system_segment_start_ms: u64 = 0;
-
-    // Track whether we've seen speech in the current segment
-    let mut mic_had_speech = false;
-    let mut system_had_speech = false;
-    let mut mic_silence_count: u32 = 0;
-    let mut system_silence_count: u32 = 0;
-
-    // Scratch buffer for draining when paused
-    let mut drain_scratch: Vec<f32> = Vec::new();
-
     while running.load(Ordering::SeqCst) {
-        // When paused, drain ring buffers to prevent overflow but discard samples
+        // When paused, drain ring buffers to prevent overflow but discard
+        // samples and reset the segmenters so partial speech isn't stitched
+        // across the pause.
         if paused.load(Ordering::SeqCst) {
-            drain_consumer(&mut mic_consumer, &mut drain_scratch);
-            drain_consumer(&mut system_consumer, &mut drain_scratch);
-            drain_scratch.clear();
-            // Reset silence timeout clock while paused
+            drain_consumer(&mut mic_consumer, &mut mic_raw_buf);
+            drain_consumer(&mut system_consumer, &mut system_raw_buf);
+            mic_raw_buf.clear();
+            system_raw_buf.clear();
+            mic_segmenter.reset();
+            system_segmenter.reset();
             last_speech_time = Instant::now();
             thread::sleep(std::time::Duration::from_millis(POLL_INTERVAL_MS));
             continue;
         }
 
-        let threshold = f32::from_bits(vad_threshold.load(Ordering::Relaxed));
-
-        // Drain mic ring buffer
+        // Drain, resample to 16 kHz mono, and feed each stream's segmenter.
         drain_consumer(&mut mic_consumer, &mut mic_raw_buf);
-
-        // Drain system ring buffer
         drain_consumer(&mut system_consumer, &mut system_raw_buf);
 
-        // Process mic segment
         let mic_mono = pipeline::process_buffer(&mic_raw_buf, mic_sample_rate, mic_channels);
-        if should_transcribe(
-            &mic_mono,
-            &mut mic_had_speech,
-            &mut mic_silence_count,
-            threshold,
-            segment_samples,
-        ) {
-            let elapsed_ms = recording_start.elapsed().as_millis() as u64;
-            if mic_had_speech {
-                // Prepend overlap from previous segment for word-boundary context
-                let audio = prepend_overlap(&mic_overlap, &mic_mono);
-                if let Some(seg) = transcribe_segment(
-                    &mut *backend,
-                    &audio,
-                    Speaker::Me,
-                    mic_segment_start_ms,
-                    elapsed_ms,
-                    initial_prompt.as_deref(),
-                    &channel,
-                ) {
-                    push_segment(seg, &mut all_segments, &shared_segments);
-                }
-            }
-            // Save tail as overlap for next segment
-            mic_overlap = tail_overlap(&mic_mono);
-            mic_raw_buf.clear();
-            mic_segment_start_ms = elapsed_ms;
-            mic_had_speech = false;
-            mic_silence_count = 0;
-        }
+        mic_raw_buf.clear();
+        let mic_ready = mic_segmenter.push_samples(&mic_mono);
 
-        // Process system segment
         let system_mono =
             pipeline::process_buffer(&system_raw_buf, system_sample_rate, system_channels);
-        if should_transcribe(
-            &system_mono,
-            &mut system_had_speech,
-            &mut system_silence_count,
-            threshold,
-            segment_samples,
-        ) {
-            let elapsed_ms = recording_start.elapsed().as_millis() as u64;
-            if system_had_speech {
-                let audio = prepend_overlap(&system_overlap, &system_mono);
-                if let Some(seg) = transcribe_segment(
-                    &mut *backend,
-                    &audio,
-                    Speaker::Others,
-                    system_segment_start_ms,
-                    elapsed_ms,
-                    initial_prompt.as_deref(),
-                    &channel,
-                ) {
-                    push_segment(seg, &mut all_segments, &shared_segments);
-                }
-            }
-            system_overlap = tail_overlap(&system_mono);
-            system_raw_buf.clear();
-            system_segment_start_ms = elapsed_ms;
-            system_had_speech = false;
-            system_silence_count = 0;
-        }
+        system_raw_buf.clear();
+        let system_ready = system_segmenter.push_samples(&system_mono);
 
-        // Track last speech time for silence timeout
-        if mic_had_speech || system_had_speech {
+        let any_speech = !mic_ready.is_empty() || !system_ready.is_empty();
+
+        emit_segments(
+            mic_ready,
+            Speaker::Me,
+            recording_start,
+            &mut *backend,
+            initial_prompt.as_deref(),
+            &channel,
+            &push_segment,
+            &mut all_segments,
+            &shared_segments,
+        );
+        emit_segments(
+            system_ready,
+            Speaker::Others,
+            recording_start,
+            &mut *backend,
+            initial_prompt.as_deref(),
+            &channel,
+            &push_segment,
+            &mut all_segments,
+            &shared_segments,
+        );
+
+        if any_speech {
             last_speech_time = Instant::now();
         }
 
@@ -355,49 +311,41 @@ fn worker_loop(
         thread::sleep(std::time::Duration::from_millis(POLL_INTERVAL_MS));
     }
 
-    // Final drain: capture any samples pushed since the last loop iteration
+    // Final drain: capture any samples pushed since the last loop iteration,
+    // feed them through, then flush any in-progress speech segment.
     drain_consumer(&mut mic_consumer, &mut mic_raw_buf);
     drain_consumer(&mut system_consumer, &mut system_raw_buf);
 
-    // Flush any remaining audio in both buffers.
-    // Use the had_speech flags from the main loop — they already track whether
-    // speech was detected in the current accumulation window. Recomputing VAD
-    // over the entire buffer would dilute speech with trailing silence, causing
-    // the final segment to be dropped.
-    let elapsed_ms = recording_start.elapsed().as_millis() as u64;
-
     let mic_mono = pipeline::process_buffer(&mic_raw_buf, mic_sample_rate, mic_channels);
-    if !mic_mono.is_empty() && mic_mono.len() >= MIN_SEGMENT_SAMPLES && mic_had_speech {
-        let audio = prepend_overlap(&mic_overlap, &mic_mono);
-        if let Some(seg) = transcribe_segment(
-            &mut *backend,
-            &audio,
-            Speaker::Me,
-            mic_segment_start_ms,
-            elapsed_ms,
-            initial_prompt.as_deref(),
-            &channel,
-        ) {
-            push_segment(seg, &mut all_segments, &shared_segments);
-        }
-    }
+    let mut mic_final = mic_segmenter.push_samples(&mic_mono);
+    mic_final.extend(mic_segmenter.flush());
+    emit_segments(
+        mic_final,
+        Speaker::Me,
+        recording_start,
+        &mut *backend,
+        initial_prompt.as_deref(),
+        &channel,
+        &push_segment,
+        &mut all_segments,
+        &shared_segments,
+    );
 
     let system_mono =
         pipeline::process_buffer(&system_raw_buf, system_sample_rate, system_channels);
-    if !system_mono.is_empty() && system_mono.len() >= MIN_SEGMENT_SAMPLES && system_had_speech {
-        let audio = prepend_overlap(&system_overlap, &system_mono);
-        if let Some(seg) = transcribe_segment(
-            &mut *backend,
-            &audio,
-            Speaker::Others,
-            system_segment_start_ms,
-            elapsed_ms,
-            initial_prompt.as_deref(),
-            &channel,
-        ) {
-            push_segment(seg, &mut all_segments, &shared_segments);
-        }
-    }
+    let mut system_final = system_segmenter.push_samples(&system_mono);
+    system_final.extend(system_segmenter.flush());
+    emit_segments(
+        system_final,
+        Speaker::Others,
+        recording_start,
+        &mut *backend,
+        initial_prompt.as_deref(),
+        &channel,
+        &push_segment,
+        &mut all_segments,
+        &shared_segments,
+    );
 
     all_segments
 }
@@ -409,76 +357,66 @@ fn drain_consumer(consumer: &mut HeapCons<f32>, buf: &mut Vec<f32>) {
     }
 }
 
-/// Size of the trailing window used for VAD checks (~100ms at 16 kHz).
-const VAD_WINDOW: usize = 1_600;
-
-/// Minimum buffer length before we'll send a segment for transcription
-/// (~0.25 seconds at 16 kHz). Short words like "yes" can be under 0.3s,
-/// so we keep this low and let the engine handle the decoding.
-const MIN_SEGMENT_SAMPLES: usize = 4_000;
-
-/// Number of consecutive silent polls required before cutting a segment.
-/// At 100ms poll interval, 5 polls = 500ms of silence before we decide
-/// the speaker has stopped. This prevents cutting mid-word on brief pauses.
-const SILENCE_HOLDOFF: u32 = 5;
-
-/// Return the last `OVERLAP_SAMPLES` of a 16 kHz mono buffer for use as
-/// overlap context in the next segment.
-fn tail_overlap(mono_16k: &[f32]) -> Vec<f32> {
-    let start = mono_16k.len().saturating_sub(OVERLAP_SAMPLES);
-    mono_16k[start..].to_vec()
+/// Build a [`Segmenter`] for one audio stream using the selected VAD backend.
+///
+/// If the selected (neural) backend fails to load at runtime — e.g. the ONNX
+/// Runtime library can't be located — we fall back to the always-available
+/// energy VAD rather than aborting the whole recording, so transcription keeps
+/// working (just with the basic detector). The failure is logged so the cause
+/// is visible.
+fn build_segmenter(kind: VadKind, energy_threshold: f32, config: SegmenterConfig) -> Segmenter {
+    let detector = match vad::create_vad(kind, energy_threshold) {
+        Ok(d) => {
+            eprintln!("[vad] backend active: {kind}");
+            d
+        }
+        Err(e) => {
+            eprintln!("[vad] backend '{kind}' failed to load: {e}; falling back to energy VAD");
+            vad::create_vad(VadKind::Energy, energy_threshold)
+                .expect("energy VAD construction never fails")
+        }
+    };
+    Segmenter::new(detector, config)
 }
 
-/// Prepend overlap samples from the previous segment to the current one.
-/// Returns a new buffer with the overlap context followed by the current audio.
-fn prepend_overlap(overlap: &[f32], current: &[f32]) -> Vec<f32> {
-    if overlap.is_empty() {
-        return current.to_vec();
-    }
-    let mut combined = Vec::with_capacity(overlap.len() + current.len());
-    combined.extend_from_slice(overlap);
-    combined.extend_from_slice(current);
-    combined
+/// Convert a count of 16 kHz samples to milliseconds.
+fn samples_to_ms(samples: usize) -> u64 {
+    (samples as u64) * 1_000 / u64::from(vad::VAD_SAMPLE_RATE)
 }
 
-/// Decide whether the accumulated 16 kHz mono buffer is ready to transcribe.
+/// Transcribe each finalized segment and push the results to the accumulators.
 ///
-/// Uses a trailing window for VAD so short utterances are detected even
-/// when surrounded by silence. A silence holdoff counter prevents cutting
-/// segments on brief pauses between words.
-///
-/// Triggers on:
-/// 1. Buffer reaching the max segment length.
-/// 2. Sustained silence after speech (holdoff expired, minimum buffer met).
-fn should_transcribe(
-    mono_16k: &[f32],
-    had_speech: &mut bool,
-    silence_count: &mut u32,
-    threshold: f32,
-    segment_samples: usize,
-) -> bool {
-    if mono_16k.len() >= segment_samples {
-        return true;
+/// Each segment's `end_ms` is the current elapsed recording time; `start_ms`
+/// is derived by subtracting the segment's audio length.
+#[allow(clippy::too_many_arguments)]
+fn emit_segments<F>(
+    segments: Vec<Vec<f32>>,
+    speaker: Speaker,
+    recording_start: Instant,
+    backend: &mut dyn SttBackend,
+    initial_prompt: Option<&str>,
+    channel: &Channel<TranscriptSegment>,
+    push_segment: &F,
+    all: &mut Vec<TranscriptSegment>,
+    shared: &Arc<Mutex<Vec<TranscriptSegment>>>,
+) where
+    F: Fn(TranscriptSegment, &mut Vec<TranscriptSegment>, &Arc<Mutex<Vec<TranscriptSegment>>>),
+{
+    for audio in segments {
+        let end_ms = recording_start.elapsed().as_millis() as u64;
+        let start_ms = end_ms.saturating_sub(samples_to_ms(audio.len()));
+        if let Some(seg) = transcribe_segment(
+            backend,
+            &audio,
+            speaker,
+            start_ms,
+            end_ms,
+            initial_prompt,
+            channel,
+        ) {
+            push_segment(seg, all, shared);
+        }
     }
-
-    // Check only the trailing window for speech, not the entire buffer.
-    // This prevents short words from being diluted by surrounding silence.
-    let window_start = mono_16k.len().saturating_sub(VAD_WINDOW);
-    let has_speech_now = pipeline::is_speech(&mono_16k[window_start..], threshold);
-
-    if has_speech_now {
-        *had_speech = true;
-        *silence_count = 0;
-    } else if *had_speech {
-        *silence_count += 1;
-    }
-
-    // Only cut the segment after sustained silence following speech
-    if *had_speech && *silence_count >= SILENCE_HOLDOFF && mono_16k.len() >= MIN_SEGMENT_SAMPLES {
-        return true;
-    }
-
-    false
 }
 
 /// Check whether STT output is a non-speech artifact (silence markers,
@@ -653,227 +591,5 @@ mod tests {
 
         // Assert
         assert!(result);
-    }
-
-    // ── should_transcribe ────────────────────────────
-
-    /// Default segment size used in tests (15 seconds at 16 kHz).
-    const TEST_SEGMENT_SAMPLES: usize = 240_000;
-
-    #[test]
-    fn should_transcribe_triggers_on_max_segment_length() {
-        // Arrange — buffer at exactly the configured segment size
-        let mono: Vec<f32> = vec![0.0; TEST_SEGMENT_SAMPLES];
-        let mut had_speech = false;
-        let mut silence_count = 0u32;
-        let threshold = 0.01;
-
-        // Act
-        let result = should_transcribe(
-            &mono,
-            &mut had_speech,
-            &mut silence_count,
-            threshold,
-            TEST_SEGMENT_SAMPLES,
-        );
-
-        // Assert
-        assert!(result);
-    }
-
-    #[test]
-    fn should_transcribe_respects_custom_segment_size() {
-        // Arrange — use a smaller segment size (5 seconds)
-        let custom_segment = 80_000;
-        let mono: Vec<f32> = vec![0.0; custom_segment];
-        let mut had_speech = false;
-        let mut silence_count = 0u32;
-        let threshold = 0.01;
-
-        // Act
-        let result = should_transcribe(
-            &mono,
-            &mut had_speech,
-            &mut silence_count,
-            threshold,
-            custom_segment,
-        );
-
-        // Assert
-        assert!(result);
-    }
-
-    #[test]
-    fn should_transcribe_does_not_trigger_on_silence_only() {
-        // Arrange — short silent buffer, no prior speech
-        let mono: Vec<f32> = vec![0.0; 8000];
-        let mut had_speech = false;
-        let mut silence_count = 0u32;
-        let threshold = 0.01;
-
-        // Act
-        let result = should_transcribe(
-            &mono,
-            &mut had_speech,
-            &mut silence_count,
-            threshold,
-            TEST_SEGMENT_SAMPLES,
-        );
-
-        // Assert
-        assert!(!result);
-        assert!(!had_speech);
-    }
-
-    #[test]
-    fn should_transcribe_detects_speech_in_trailing_window() {
-        // Arrange — silence followed by a loud trailing window
-        let mut mono: Vec<f32> = vec![0.0; 8000];
-        // Fill the last VAD_WINDOW samples with speech
-        let speech_start = mono.len() - VAD_WINDOW;
-        for sample in &mut mono[speech_start..] {
-            *sample = 0.5;
-        }
-        let mut had_speech = false;
-        let mut silence_count = 0u32;
-        let threshold = 0.01;
-
-        // Act
-        let result = should_transcribe(
-            &mono,
-            &mut had_speech,
-            &mut silence_count,
-            threshold,
-            TEST_SEGMENT_SAMPLES,
-        );
-
-        // Assert — speech detected but holdoff not yet expired
-        assert!(!result);
-        assert!(had_speech);
-        assert_eq!(silence_count, 0);
-    }
-
-    #[test]
-    fn should_transcribe_triggers_after_silence_holdoff() {
-        // Arrange — simulate speech detected, then enough silence polls
-        let mono: Vec<f32> = vec![0.0; MIN_SEGMENT_SAMPLES]; // silent buffer
-        let mut had_speech = true; // speech was detected previously
-        let mut silence_count = SILENCE_HOLDOFF - 1; // one poll away from triggering
-        let threshold = 0.01;
-
-        // Act — this poll should push silence_count to SILENCE_HOLDOFF
-        let result = should_transcribe(
-            &mono,
-            &mut had_speech,
-            &mut silence_count,
-            threshold,
-            TEST_SEGMENT_SAMPLES,
-        );
-
-        // Assert
-        assert!(result);
-        assert_eq!(silence_count, SILENCE_HOLDOFF);
-    }
-
-    #[test]
-    fn should_transcribe_resets_silence_count_on_new_speech() {
-        // Arrange — speech was detected, some silence accumulated, then speech again
-        let mut mono: Vec<f32> = vec![0.0; 8000];
-        let speech_start = mono.len() - VAD_WINDOW;
-        for sample in &mut mono[speech_start..] {
-            *sample = 0.5;
-        }
-        let mut had_speech = true;
-        let mut silence_count = 3u32;
-        let threshold = 0.01;
-
-        // Act
-        let _result = should_transcribe(
-            &mono,
-            &mut had_speech,
-            &mut silence_count,
-            threshold,
-            TEST_SEGMENT_SAMPLES,
-        );
-
-        // Assert — silence count reset because speech was detected
-        assert_eq!(silence_count, 0);
-    }
-
-    #[test]
-    fn should_transcribe_does_not_trigger_below_min_segment() {
-        // Arrange — had speech + holdoff expired but buffer too short
-        let mono: Vec<f32> = vec![0.0; MIN_SEGMENT_SAMPLES - 1];
-        let mut had_speech = true;
-        let mut silence_count = SILENCE_HOLDOFF - 1;
-        let threshold = 0.01;
-
-        // Act
-        let result = should_transcribe(
-            &mono,
-            &mut had_speech,
-            &mut silence_count,
-            threshold,
-            TEST_SEGMENT_SAMPLES,
-        );
-
-        // Assert — holdoff reached but buffer too short
-        assert!(!result);
-    }
-
-    // ── tail_overlap ────────────────────────────
-
-    #[test]
-    fn tail_overlap_returns_last_n_samples() {
-        // Arrange
-        let audio: Vec<f32> = (0..10_000).map(|i| i as f32).collect();
-
-        // Act
-        let overlap = tail_overlap(&audio);
-
-        // Assert
-        assert_eq!(overlap.len(), OVERLAP_SAMPLES);
-        assert_eq!(overlap[0], (10_000 - OVERLAP_SAMPLES) as f32);
-        assert_eq!(*overlap.last().unwrap(), 9_999.0);
-    }
-
-    #[test]
-    fn tail_overlap_returns_all_when_shorter_than_overlap() {
-        // Arrange
-        let audio: Vec<f32> = vec![1.0, 2.0, 3.0];
-
-        // Act
-        let overlap = tail_overlap(&audio);
-
-        // Assert
-        assert_eq!(overlap, vec![1.0, 2.0, 3.0]);
-    }
-
-    // ── prepend_overlap ────────────────────────────
-
-    #[test]
-    fn prepend_overlap_combines_buffers() {
-        // Arrange
-        let overlap = vec![1.0, 2.0, 3.0];
-        let current = vec![4.0, 5.0, 6.0];
-
-        // Act
-        let combined = prepend_overlap(&overlap, &current);
-
-        // Assert
-        assert_eq!(combined, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
-    }
-
-    #[test]
-    fn prepend_overlap_returns_current_when_overlap_empty() {
-        // Arrange
-        let overlap: Vec<f32> = vec![];
-        let current = vec![4.0, 5.0, 6.0];
-
-        // Act
-        let combined = prepend_overlap(&overlap, &current);
-
-        // Assert
-        assert_eq!(combined, vec![4.0, 5.0, 6.0]);
     }
 }

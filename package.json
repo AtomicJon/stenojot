@@ -22,7 +22,7 @@
     "lint": "yarn lint:ui && yarn lint:tauri",
     "lint:ui": "eslint . && tsc --noEmit",
     "lint:tauri": "cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings",
-    "ci": "yarn format:all:check && yarn lint:all && yarn test"
+    "ci": "yarn format:check && yarn lint && yarn test"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.8",

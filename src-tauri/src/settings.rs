@@ -20,8 +20,10 @@ pub struct Settings {
     pub system_device_id: Option<String>,
     /// Microphone gain multiplier (0.1–10.0).
     pub mic_gain: f32,
-    /// VAD sensitivity threshold (0.0005–0.1).
+    /// VAD sensitivity threshold (0.0005–0.1). Used only by the energy backend.
     pub vad_threshold: f32,
+    /// VAD backend identifier ("silero", "ten", or "energy").
+    pub vad_engine: String,
     /// Custom models directory path (None = use default).
     pub models_dir: Option<String>,
     /// Output directory for meeting transcript files (None = ~/StenoJot/).
@@ -54,6 +56,9 @@ pub struct Settings {
 /// Default STT engine.
 pub const DEFAULT_STT_ENGINE: &str = "whisper";
 
+/// Default VAD backend — Silero is the only independently-validated model.
+pub const DEFAULT_VAD_ENGINE: &str = "silero";
+
 /// Default Whisper model name.
 pub const DEFAULT_WHISPER_MODEL: &str = "base";
 
@@ -70,6 +75,7 @@ impl Default for Settings {
             system_device_id: None,
             mic_gain: 1.0,
             vad_threshold: pipeline::DEFAULT_VAD_THRESHOLD,
+            vad_engine: DEFAULT_VAD_ENGINE.to_string(),
             models_dir: None,
             output_dir: None,
             silence_timeout_seconds: Some(300),
@@ -155,6 +161,7 @@ mod tests {
         // Assert
         assert_eq!(settings.mic_gain, 1.0);
         assert_eq!(settings.vad_threshold, pipeline::DEFAULT_VAD_THRESHOLD);
+        assert_eq!(settings.vad_engine, DEFAULT_VAD_ENGINE);
         assert!(settings.mic_device_id.is_none());
         assert!(settings.system_device_id.is_none());
         assert!(settings.models_dir.is_none());
@@ -172,6 +179,7 @@ mod tests {
             system_device_id: Some("monitor-0".to_string()),
             mic_gain: 2.5,
             vad_threshold: 0.01,
+            vad_engine: "ten".to_string(),
             models_dir: Some("/custom/models".to_string()),
             output_dir: Some("/custom/output".to_string()),
             silence_timeout_seconds: Some(120),
@@ -196,6 +204,7 @@ mod tests {
         assert_eq!(loaded.system_device_id.as_deref(), Some("monitor-0"));
         assert!((loaded.mic_gain - 2.5).abs() < f32::EPSILON);
         assert!((loaded.vad_threshold - 0.01).abs() < f32::EPSILON);
+        assert_eq!(loaded.vad_engine, "ten");
         assert_eq!(loaded.models_dir.as_deref(), Some("/custom/models"));
         assert_eq!(loaded.whisper_model, "small");
         assert_eq!(
